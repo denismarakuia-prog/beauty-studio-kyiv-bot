@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: beauty-studio-kyiv
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+
+    envVars:
+      - key: BOT_TOKEN
+        sync: false          # Set manually in Render dashboard
+
+      - key: OPENAI_API_KEY
+        sync: false          # Set manually in Render dashboard
+
+      - key: ADMIN_IDS
+        value: "7520370397"
+
+      - key: DATABASE_PATH
+        value: /app/data/beauty_studio.db
+
+      # After first deploy, set to: https://<your-service>.onrender.com/webapp
+      - key: WEBAPP_URL
+        sync: false
+
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+
+      - key: LOG_LEVEL
+        value: INFO
+
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+    # Uncomment and upgrade to a paid plan to enable persistent SQLite storage.
+    # On the free tier the /app/data directory resets on every deploy.
+    # disk:
+    #   name: beauty-studio-data
+    #   mountPath: /app/data
+    #   sizeGB: 1

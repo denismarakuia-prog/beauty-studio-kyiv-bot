@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Beauty Studio Kyiv</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --rose:       #9B2335;
+      --rose-light: #C24B5A;
+      --rose-pale:  #F9EEF0;
+      --gold:       #B8892A;
+      --gold-light: #E8C96A;
+      --cream:      #FAF7F4;
+      --white:      #FFFFFF;
+      --ink:        #1C0F10;
+      --ink-mid:    #5C3B3E;
+      --ink-soft:   #9C7A7D;
+      --border:     rgba(155, 35, 53, 0.10);
+      --shadow-sm:  0 2px 12px rgba(28, 15, 16, 0.08);
+      --shadow-md:  0 8px 32px rgba(28, 15, 16, 0.12);
+      --radius:     16px;
+      --radius-sm:  10px;
+      --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+
+    body {
+      font-family: 'Jost', system-ui, sans-serif;
+      background: var(--cream);
+      color: var(--ink);
+      min-height: 100dvh;
+      overflow-x: hidden;
+    }
+
+    img { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { font-family: inherit; cursor: pointer; border: none; background: none; }
+
+    /* ── Scrollbar ────────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Typography ──────────────────────────────────────────────────────── */
+    .serif { font-family: 'Cormorant Garamond', Georgia, serif; }
+    h1, h2, h3 { font-family: 'Cormorant Garamond', Georgia, serif; line-height: 1.15; }
+    h1 { font-size: clamp(2.4rem, 8vw, 3.6rem); font-weight: 600; }
+    h2 { font-size: clamp(1.8rem, 5vw, 2.6rem); font-weight: 600; }
+    h3 { font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 500; }
+
+    /* ── Animations ──────────────────────────────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes shimmer {
+      0%   { background-position: -200% center; }
+      100% { background-position:  200% center; }
+    }
+    @keyframes pulse-ring {
+      0%   { transform: scale(1);   opacity: 0.6; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+
+    .fade-in { animation: fadeUp 0.7s var(--transition) both; }
+    .fade-in-2 { animation: fadeUp 0.7s 0.15s var(--transition) both; }
+    .fade-in-3 { animation: fadeUp 0.7s 0.30s var(--transition) both; }
+
+    /* ── Intersection observer reveal ────────────────────────────────────── */
+    .reveal { opacity: 0; transform: translateY(32px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    /* ── Header ──────────────────────────────────────────────────────────── */
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      background: rgba(250, 247, 244, 0.88);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .header-logo {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--rose);
+    }
+
+    .header-logo span { color: var(--gold); }
+
+    .header-book-btn {
+      background: var(--rose);
+      color: var(--white);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 9px 18px;
+      border-radius: 50px;
+      transition: background var(--transition), transform var(--transition);
+    }
+    .header-book-btn:active { background: var(--rose-light); transform: scale(0.97); }
+
+    /* ── Hero ────────────────────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      min-height: min(92dvh, 640px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 60px 24px 80px;
+      overflow: hidden;
+    }
+
+    .hero-bg {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 30%, rgba(155,35,53,0.10) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 50% at 20% 80%, rgba(184,137,42,0.08) 0%, transparent 60%),
+        linear-gradient(175deg, #FAF7F4 0%, #F4EBE8 100%);
+      z-index: 0;
+    }
+
+    /* Decorative circles */
+    .hero-bg::before, .hero-bg::after {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(155,35,53,0.12);
+    }
+    .hero-bg::before { width: 340px; height: 340px; top: -80px; right: -100px; }
+    .hero-bg::after  { width: 220px; height: 220px; bottom: 40px; left: -60px; }
+
+    .hero-content { position: relative; z-index: 1; max-width: 480px; }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 18px;
+    }
+    .hero-eyebrow::before, .hero-eyebrow::after {
+      content: '';
+      width: 28px; height: 1px;
+      background: var(--gold-light);
+    }
+
+    .hero-title { color: var(--ink); margin-bottom: 8px; }
+    .hero-title em { color: var(--rose); font-style: normal; }
+
+    .hero-tagline {
+      font-size: 1.05rem;
+      font-weight: 300;
+      color: var(--ink-mid);
+      letter-spacing: 0.02em;
+      margin: 16px 0 36px;
+    }
+
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(135deg, var(--rose) 0%, var(--rose-light) 100%);
+      color: var(--white);
+      font-size: 0.92rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 16px 36px;
+      border-radius: 50px;
+      box-shadow: 0 6px 24px rgba(155,35,53,0.35);
+      transition: transform var(--transition), box-shadow var(--transition);
+      position: relative;
+    }
+    .hero-cta:active { transform: scale(0.97); box-shadow: 0 3px 12px rgba(155,35,53,0.25); }
+
+    .hero-scroll {
+      position: absolute;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      color: var(--ink-soft);
+      font-size: 0.68rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      animation: fadeUp 1s 1s both;
+    }
+
+    .scroll-line {
+      width: 1px; height: 32px;
+      background: linear-gradient(to bottom, var(--rose), transparent);
+      animation: shimmer 1.8s infinite;
+    }
+
+    /* ── Section wrapper ─────────────────────────────────────────────────── */
+    .section { padding: 64px 20px; }
+    .section-inner { max-width: 520px; margin: 0 auto; }
+
+    .section-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 8px;
+    }
+
+    .section-title {
+      color: var(--ink);
+      margin-bottom: 32px;
+    }
+
+    .divider {
+      width: 48px; height: 2px;
+      background: linear-gradient(90deg, var(--rose), var(--gold-light));
+      border-radius: 2px;
+      margin: 12px 0 32px;
+    }
+
+    /* ── Service cards ───────────────────────────────────────────────────── */
+    .services-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .service-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 20px;
+      box-shadow: var(--shadow-sm);
+      transition: transform var(--transition), box-shadow var(--transition);
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .service-card:active { transform: scale(0.99); }
+
+    .service-icon {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      background: var(--rose-pale);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      flex-shrink: 0;
+    }
+
+    .service-body { flex: 1; min-width: 0; }
+
+    .service-name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+
+    .service-desc {
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      line-height: 1.55;
+      margin-bottom: 12px;
+    }
+
+    .service-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--ink-mid);
+    }
+
+    .meta-pill svg { width: 13px; height: 13px; opacity: 0.7; }
+
+    .service-book-btn {
+      margin-top: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--rose-pale);
+      color: var(--rose);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 8px 16px;
+      border-radius: 50px;
+      border: 1px solid rgba(155,35,53,0.15);
+      transition: background var(--transition), color var(--transition);
+    }
+    .service-book-btn:active { background: var(--rose); color: var(--white); }
+
+    /* ── Price table ─────────────────────────────────────────────────────── */
+    .price-section { background: var(--white); }
+
+    .price-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .price-table tr {
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition);
+    }
+    .price-table tr:last-child { border-bottom: none; }
+    .price-table tr:active { background: var(--rose-pale); }
+
+    .price-table td {
+      padding: 16px 4px;
+      vertical-align: middle;
+    }
+
+    .pt-service {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .pt-emoji { font-size: 1.2rem; }
+    .pt-name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .pt-dur {
+      font-size: 0.74rem;
+      color: var(--ink-soft);
+      text-align: right;
+      white-space: nowrap;
+      padding-right: 8px;
+    }
+    .pt-price {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--rose);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    /* ── Contacts ────────────────────────────────────────────────────────── */
+    .contacts-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .contact-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition);
+    }
+    .contact-row:last-child { border-bottom: none; }
+    .contact-row:active { background: var(--rose-pale); }
+
+    .contact-icon {
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      background: var(--rose-pale);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+
+    .contact-label {
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin-bottom: 2px;
+    }
+
+    .contact-value {
+      font-size: 0.92rem;
+      font-weight: 500;
+      color: var(--ink);
+    }
+
+    .contact-value a { color: var(--rose); }
+
+    .map-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px;
+      background: var(--rose-pale);
+      border-top: 1px solid var(--border);
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--rose);
+      letter-spacing: 0.04em;
+      transition: background var(--transition);
+    }
+    .map-link:active { background: var(--rose); color: var(--white); }
+
+    /* ── Bottom CTA ──────────────────────────────────────────────────────── */
+    .bottom-cta {
+      padding: 48px 24px calc(48px + env(safe-area-inset-bottom));
+      text-align: center;
+      background: linear-gradient(170deg, var(--cream) 0%, #F0E6E8 100%);
+    }
+
+    .bottom-cta-title {
+      font-size: clamp(1.6rem, 5vw, 2.2rem);
+      color: var(--ink);
+      margin-bottom: 10px;
+    }
+
+    .bottom-cta-sub {
+      font-size: 0.9rem;
+      color: var(--ink-mid);
+      margin-bottom: 32px;
+    }
+
+    .cta-btn-primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      max-width: 340px;
+      background: linear-gradient(135deg, var(--rose) 0%, #C4445A 100%);
+      color: var(--white);
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      padding: 18px 32px;
+      border-radius: 50px;
+      box-shadow: 0 8px 28px rgba(155,35,53,0.38);
+      transition: transform var(--transition), box-shadow var(--transition);
+    }
+    .cta-btn-primary:active {
+      transform: scale(0.97);
+      box-shadow: 0 4px 14px rgba(155,35,53,0.25);
+    }
+
+    /* ── Footer ──────────────────────────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      padding: 20px 24px calc(20px + env(safe-area-inset-bottom));
+      font-size: 0.72rem;
+      color: var(--ink-soft);
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Telegram theme overrides ─────────────────────────────────────────── */
+    body.tg-dark {
+      --cream:     #1A1215;
+      --white:     #231719;
+      --ink:       #F5EDEE;
+      --ink-mid:   #C4A8AB;
+      --ink-soft:  #8C6669;
+      --border:    rgba(155, 35, 53, 0.18);
+      --rose-pale: rgba(155,35,53,0.14);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="header-logo">Beauty <span>Studio</span></div>
+    <button class="header-book-btn" onclick="openBooking()">Записатися</button>
+  </header>
+
+  <!-- ── Hero ────────────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-content">
+      <div class="hero-eyebrow fade-in">Салон краси · Київ</div>
+      <h1 class="hero-title fade-in-2">
+        Beauty<br><em>Studio</em> Kyiv
+      </h1>
+      <p class="hero-tagline fade-in-3">Краса і стиль — наша пристрасть</p>
+      <button class="hero-cta fade-in-3" onclick="openBooking()">
+        <span>📅</span> Записатися онлайн
+      </button>
+    </div>
+    <div class="hero-scroll">
+      <div class="scroll-line"></div>
+      Прокрутіть
+    </div>
+  </section>
+
+  <!-- ── Services ────────────────────────────────────────────────────────── -->
+  <section class="section" id="services">
+    <div class="section-inner">
+      <div class="section-label reveal">Що ми пропонуємо</div>
+      <h2 class="section-title reveal">Наші послуги</h2>
+      <div class="divider reveal"></div>
+      <div class="services-grid" id="servicesGrid"></div>
+    </div>
+  </section>
+
+  <!-- ── Price list ──────────────────────────────────────────────────────── -->
+  <section class="section price-section" id="prices">
+    <div class="section-inner">
+      <div class="section-label reveal">Вартість послуг</div>
+      <h2 class="section-title reveal">Прайс-лист</h2>
+      <div class="divider reveal"></div>
+      <table class="price-table reveal" id="priceTable"></table>
+    </div>
+  </section>
+
+  <!-- ── About the salon ─────────────────────────────────────────────────── -->
+  <section class="section price-section" id="about">
+    <div class="section-inner">
+      <div class="section-label reveal">Наша історія</div>
+      <h2 class="section-title reveal">Про салон</h2>
+      <div class="divider reveal"></div>
+      <div class="contacts-card reveal" style="padding: 22px 20px;">
+        <p style="font-size:0.92rem; line-height:1.7; color: var(--ink-mid);">
+          Beauty Studio Kyiv — це простір, де краса зустрічається з турботою.
+          Більше 8 років ми допомагаємо жінкам та чоловікам Києва відчувати
+          себе впевнено та доглянуто.
+        </p>
+        <p style="font-size:0.92rem; line-height:1.7; color: var(--ink-mid); margin-top:12px;">
+          У нас працюють тільки сертифіковані майстри, ми використовуємо
+          професійну косметику преміум-класу та суворо дотримуємось
+          санітарних норм. Затишна атмосфера та результат, який перевершує
+          очікування.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Contacts ────────────────────────────────────────────────────────── -->
+  <section class="section" id="contacts">
+    <div class="section-inner">
+      <div class="section-label reveal">Де нас знайти</div>
+      <h2 class="section-title reveal">Контакти</h2>
+      <div class="divider reveal"></div>
+      <div class="contacts-card reveal">
+        <div class="contact-row">
+          <div class="contact-icon">📍</div>
+          <div>
+            <div class="contact-label">Адреса</div>
+            <div class="contact-value">м. Київ, вул. Хрещатик, 22</div>
+          </div>
+        </div>
+        <div class="contact-row">
+          <div class="contact-icon">📞</div>
+          <div>
+            <div class="contact-label">Телефони</div>
+            <div class="contact-value">
+              <a href="tel:+380674518239">+380 67 451 82 39</a><br>
+              <a href="tel:+380937745126">+380 93 774 51 26</a>
+            </div>
+          </div>
+        </div>
+        <div class="contact-row">
+          <div class="contact-icon">🕐</div>
+          <div>
+            <div class="contact-label">Години роботи</div>
+            <div class="contact-value">Щодня 09:00 – 20:00</div>
+          </div>
+        </div>
+        <a
+          class="map-link"
+          href="https://maps.google.com/?q=50.4501,30.5234"
+          target="_blank"
+          rel="noopener"
+        >
+          🗺 Відкрити на карті
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Bottom CTA ──────────────────────────────────────────────────────── -->
+  <section class="bottom-cta" id="book">
+    <div class="section-inner">
+      <h2 class="bottom-cta-title serif reveal">Готові до змін?</h2>
+      <p class="bottom-cta-sub reveal">Запишіться онлайн — швидко та зручно</p>
+      <button class="cta-btn-primary reveal" onclick="openBooking()">
+        ✨ Записатися зараз
+      </button>
+    </div>
+  </section>
+
+  <!-- ── Footer ──────────────────────────────────────────────────────────── -->
+  <footer class="footer">
+    © 2024 Beauty Studio Kyiv · Всі права захищено
+  </footer>
+
+  <script>
+    // ── Data ───────────────────────────────────────────────────────────────
+    const SERVICES = [
+      {
+        id: 'manicure',
+        emoji: '💅',
+        name: 'Манікюр',
+        desc: 'Класичний, гелевий або комбінований манікюр. Матеріали преміум-класу.',
+        duration: '60–90 хв',
+        price: '450–900 грн',
+      },
+      {
+        id: 'pedicure',
+        emoji: '🦶',
+        name: 'Педикюр',
+        desc: 'Апаратний або SPA-педикюр. Повний догляд із парафінотерапією.',
+        duration: '60–120 хв',
+        price: '550–1 200 грн',
+      },
+      {
+        id: 'haircut',
+        emoji: '✂️',
+        name: 'Стрижка',
+        desc: 'Жіноча або чоловіча стрижка з укладкою від досвідчених майстрів.',
+        duration: '45–90 хв',
+        price: '350–800 грн',
+      },
+      {
+        id: 'coloring',
+        emoji: '🎨',
+        name: 'Фарбування',
+        desc: 'Омбре, балаяж, мелірування, однотонне. Лише преміум-фарби.',
+        duration: '120–240 хв',
+        price: '900–3 500 грн',
+      },
+      {
+        id: 'cosmetology',
+        emoji: '✨',
+        name: 'Косметологія',
+        desc: 'Чистка обличчя, мезотерапія, пілінги. Доглянута сяюча шкіра.',
+        duration: '60–90 хв',
+        price: '800–2 500 грн',
+      },
+    ];
+
+    // ── Telegram WebApp ────────────────────────────────────────────────────
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      if (tg.colorScheme === 'dark') {
+        document.body.classList.add('tg-dark');
+      }
+    }
+
+    function openBooking(serviceId) {
+      const payload = JSON.stringify({ action: 'book', service: serviceId || '' });
+      if (tg) {
+        tg.sendData(payload);
+      } else {
+        // Fallback for browser preview
+        alert('Відкрийте бот у Telegram, щоб записатися 💕');
+      }
+    }
+
+    // ── Render services ────────────────────────────────────────────────────
+    const grid = document.getElementById('servicesGrid');
+    SERVICES.forEach((s, i) => {
+      const delay = i * 0.08;
+      grid.insertAdjacentHTML('beforeend', `
+        <div class="service-card reveal" style="transition-delay:${delay}s">
+          <div class="service-icon">${s.emoji}</div>
+          <div class="service-body">
+            <div class="service-name">${s.name}</div>
+            <div class="service-desc">${s.desc}</div>
+            <div class="service-meta">
+              <span class="meta-pill">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+                ${s.duration}
+              </span>
+              <span class="meta-pill">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="1" x2="12" y2="23"/>
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                </svg>
+                ${s.price}
+              </span>
+            </div>
+            <button class="service-book-btn" onclick="openBooking('${s.id}')">
+              📅 Записатися
+            </button>
+          </div>
+        </div>
+      `);
+    });
+
+    // ── Render price table ─────────────────────────────────────────────────
+    const table = document.getElementById('priceTable');
+    SERVICES.forEach(s => {
+      table.insertAdjacentHTML('beforeend', `
+        <tr onclick="openBooking('${s.id}')">
+          <td>
+            <div class="pt-service">
+              <span class="pt-emoji">${s.emoji}</span>
+              <span class="pt-name">${s.name}</span>
+            </div>
+          </td>
+          <td class="pt-dur">${s.duration}</td>
+          <td class="pt-price">${s.price}</td>
+        </tr>
+      `);
+    });
+
+    // ── Intersection observer for .reveal elements ──────────────────────
+    const io = new IntersectionObserver(
+      (entries) => entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+          io.unobserve(e.target);
+        }
+      }),
+      { threshold: 0.12 }
+    );
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+  </script>
+</body>
+</html>
