@@ -3,18 +3,30 @@ Fully click-driven booking flow:
 
     📅 Записатися
       ↓ (contact collected once, then skipped forever)
-    Послуга  →  Дата  →  Вільний час  →  Підтвердження
+    Послуга  →  Дата (compact calendar, multi-month)  →  Вільний час  →  Підтвердження
 
 Every step is an inline keyboard — no manual typing of dates/times anywhere.
+
+Time values are NEVER placed raw into callback_data: aiogram's CallbackData
+rejects any field containing ':' (e.g. '09:00'), which previously crashed
+production with "ValueError: Separator symbol ':' can not be used in value
+'09:00'". All time values go through encode_time()/decode_time() at the
+keyboard/callback boundary; everywhere else (state, DB, notifications) keeps
+using the normal 'HH:MM' string.
+
 Slot protection is enforced at the database layer (partial unique index);
 this module also re-checks freshness defensively before writing, so a
 double-tap or a stale screen can never create two bookings for the same slot.
+
+Every step carries the same three-button safety net: ⬅️ Назад · 🏠 Головне
+меню · ❌ Скасувати — so the user can never reach a dead end.
 """
 from __future__ import annotations
 
 import json
 import logging
 import time
+
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -26,8 +38,8 @@ from bot.keyboards.builders import (
     BTN_BOOK,
     MENU_BUTTON_LABELS,
     BookingCallback,
+    booking_calendar_keyboard,
     booking_confirm_keyboard,
-    booking_date_keyboard,
     booking_service_keyboard,
     booking_time_keyboard,
     contact_request_keyboard,
@@ -37,9 +49,13 @@ from bot.keyboards.builders import (
 from bot.salon_data import SERVICES_MAP
 from bot.services.notification_service import notify_new_booking
 from bot.services.scheduling_service import (
+    decode_month,
+    decode_time,
+    default_calendar_month,
+    encode_month,
     format_date_display,
     get_available_times,
-    get_bookable_dates,
+    get_calendar_month,
     is_slot_still_valid,
 )
 
@@ -163,13 +179,16 @@ async def _begin_booking_flow(
         )
         return
 
-    # 3 — service picker (or skip straight to date if pre-selected)
+    # 3 — service picker (or skip straight to the calendar if pre-selected)
     if preselected_service_id and preselected_service_id in SERVICES_MAP:
         await state.update_data(service_id=preselected_service_id, started_at=time.time())
+        cal = default_calendar_month()
+        await state.update_data(cal_year=cal.year, cal_month=cal.month)
         await state.set_state(BookingStates.picking_date)
         await message.answer(
-            f"✅ Послуга: <b>{_service_label(preselected_service_id)}</b>\n\n📅 Оберіть дату:",
-            reply_markup=booking_date_keyboard(get_bookable_dates()),
+            f"✅ Послуга: <b>{_service_label(preselected_service_id)}</b>\n\n"
+            f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
+            reply_markup=booking_calendar_keyboard(cal),
             parse_mode="HTML",
         )
     else:
@@ -216,6 +235,29 @@ async def entry_from_webapp(
     )
 
 
+# ── No-op (calendar header / padding cells) ─────────────────────────────────────
+
+@router.callback_query(BookingCallback.filter(F.action == "noop"))
+async def cb_noop(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+
+# ── Global "🏠 Головне меню" — works from any booking step ─────────────────────
+
+@router.callback_query(BookingCallback.filter(F.action == "main_menu"))
+async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    try:
+        await callback.message.edit_text("🏠 Головне меню")
+    except Exception:
+        pass
+    await callback.message.answer(
+        "Оберіть дію на клавіатурі нижче 👇",
+        reply_markup=main_reply_keyboard(),
+    )
+    await callback.answer()
+
+
 # ── Step: contact collection ───────────────────────────────────────────────────
 
 @router.message(BookingStates.waiting_contact, F.contact)
@@ -257,10 +299,13 @@ async def step_contact(
 
     if preselected and preselected in SERVICES_MAP:
         await state.update_data(service_id=preselected)
+        cal = default_calendar_month()
+        await state.update_data(cal_year=cal.year, cal_month=cal.month)
         await state.set_state(BookingStates.picking_date)
         await message.answer(
-            f"💄 Послуга: <b>{_service_label(preselected)}</b>\n\n📅 Оберіть дату:",
-            reply_markup=booking_date_keyboard(get_bookable_dates()),
+            f"💄 Послуга: <b>{_service_label(preselected)}</b>\n\n"
+            f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
+            reply_markup=booking_calendar_keyboard(cal),
             parse_mode="HTML",
         )
     else:
@@ -299,16 +344,45 @@ async def cb_pick_service(
         return
 
     await state.update_data(service_id=service_id)
+    cal = default_calendar_month()
+    await state.update_data(cal_year=cal.year, cal_month=cal.month)
     await state.set_state(BookingStates.picking_date)
     await callback.message.edit_text(
-        f"✅ Послуга: <b>{_service_label(service_id)}</b>\n\n📅 Оберіть дату:",
-        reply_markup=booking_date_keyboard(get_bookable_dates()),
+        f"✅ Послуга: <b>{_service_label(service_id)}</b>\n\n"
+        f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
+        reply_markup=booking_calendar_keyboard(cal),
         parse_mode="HTML",
     )
     await callback.answer()
 
 
-# ── Step: date ─────────────────────────────────────────────────────────────────
+# ── Step: date (calendar navigation + day selection) ───────────────────────────
+
+@router.callback_query(BookingCallback.filter(F.action == "cal_nav"), BookingStates.picking_date)
+async def cb_calendar_navigate(
+    callback: CallbackQuery, callback_data: BookingCallback, state: FSMContext
+) -> None:
+    data = await state.get_data()
+    if not _session_fresh(data):
+        await _expire_session(callback.message, state)
+        await callback.answer()
+        return
+
+    decoded = decode_month(callback_data.value)
+    if decoded is None:
+        await callback.answer()
+        return
+
+    year, month = decoded
+    cal = get_calendar_month(year, month)
+    await state.update_data(cal_year=cal.year, cal_month=cal.month)
+    await callback.message.edit_text(
+        f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
+        reply_markup=booking_calendar_keyboard(cal),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
 
 @router.callback_query(BookingCallback.filter(F.action == "date"), BookingStates.picking_date)
 async def cb_pick_date(
@@ -335,13 +409,16 @@ async def cb_pick_date(
     free = get_available_times(date_iso, taken)
 
     if not free:
+        await callback.answer("На цю дату вже немає вільних місць", show_alert=True)
+        cal_year = data.get("cal_year") or 0
+        cal_month = data.get("cal_month") or 0
+        cal = get_calendar_month(cal_year, cal_month) if cal_year and cal_month else default_calendar_month()
         await callback.message.edit_text(
             f"😔 На <b>{format_date_display(date_iso)}</b> вже немає вільних місць.\n\n"
-            "Оберіть іншу дату:",
-            reply_markup=booking_date_keyboard(get_bookable_dates()),
+            f"📅 <b>{cal.title}</b>\n\nОберіть іншу дату:",
+            reply_markup=booking_calendar_keyboard(cal),
             parse_mode="HTML",
         )
-        await callback.answer()
         return
 
     await state.update_data(booking_date=date_iso)
@@ -372,7 +449,11 @@ async def cb_pick_time(
 
     date_iso = data.get("booking_date", "")
     service_id = data.get("service_id", "")
-    time_str = callback_data.value
+
+    time_str = decode_time(callback_data.value)
+    if not time_str:
+        await callback.answer("Помилка вибору часу. Спробуйте ще раз.", show_alert=True)
+        return
 
     if not date_iso or service_id not in SERVICES_MAP:
         await _expire_session(callback.message, state)
@@ -398,10 +479,12 @@ async def cb_pick_time(
             )
         else:
             await state.set_state(BookingStates.picking_date)
+            cal = default_calendar_month()
+            await state.update_data(cal_year=cal.year, cal_month=cal.month)
             await callback.message.edit_text(
                 "😔 Цей час щойно зайняли, а вільних місць на цю дату більше немає.\n\n"
-                "Оберіть іншу дату:",
-                reply_markup=booking_date_keyboard(get_bookable_dates()),
+                f"📅 <b>{cal.title}</b>\n\nОберіть іншу дату:",
+                reply_markup=booking_calendar_keyboard(cal),
                 parse_mode="HTML",
             )
         return
@@ -475,10 +558,12 @@ async def cb_confirm(
             )
         else:
             await state.set_state(BookingStates.picking_date)
+            cal = default_calendar_month()
+            await state.update_data(cal_year=cal.year, cal_month=cal.month)
             await callback.message.edit_text(
                 "⏳ Обраний час уже минув, а вільних місць на цю дату більше немає.\n\n"
-                "📅 Оберіть іншу дату:",
-                reply_markup=booking_date_keyboard(get_bookable_dates()),
+                f"📅 <b>{cal.title}</b>\n\nОберіть іншу дату:",
+                reply_markup=booking_calendar_keyboard(cal),
                 parse_mode="HTML",
             )
         return
@@ -528,10 +613,12 @@ async def cb_confirm(
             )
         else:
             await state.set_state(BookingStates.picking_date)
+            cal = default_calendar_month()
+            await state.update_data(cal_year=cal.year, cal_month=cal.month)
             await callback.message.edit_text(
                 "😔 Цей час щойно зайняли, а вільних місць на цю дату більше немає.\n\n"
-                "📅 Оберіть іншу дату:",
-                reply_markup=booking_date_keyboard(get_bookable_dates()),
+                f"📅 <b>{cal.title}</b>\n\nОберіть іншу дату:",
+                reply_markup=booking_calendar_keyboard(cal),
                 parse_mode="HTML",
             )
         return
@@ -594,17 +681,27 @@ async def cb_back(
         )
 
     elif target == "date":
+        cal_year = data.get("cal_year") or 0
+        cal_month = data.get("cal_month") or 0
+        cal = get_calendar_month(cal_year, cal_month) if cal_year and cal_month else default_calendar_month()
+        await state.update_data(cal_year=cal.year, cal_month=cal.month)
         await state.set_state(BookingStates.picking_date)
         await callback.message.edit_text(
-            "📅 Оберіть дату:", reply_markup=booking_date_keyboard(get_bookable_dates())
+            f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
+            reply_markup=booking_calendar_keyboard(cal),
+            parse_mode="HTML",
         )
 
     elif target == "time":
         date_iso = data.get("booking_date", "")
         if not date_iso:
+            cal = default_calendar_month()
+            await state.update_data(cal_year=cal.year, cal_month=cal.month)
             await state.set_state(BookingStates.picking_date)
             await callback.message.edit_text(
-                "📅 Оберіть дату:", reply_markup=booking_date_keyboard(get_bookable_dates())
+                f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
+                reply_markup=booking_calendar_keyboard(cal),
+                parse_mode="HTML",
             )
         else:
             try:
@@ -613,11 +710,15 @@ async def cb_back(
                 taken = []
             free = get_available_times(date_iso, taken)
             if not free:
+                cal_year = data.get("cal_year") or 0
+                cal_month = data.get("cal_month") or 0
+                cal = get_calendar_month(cal_year, cal_month) if cal_year and cal_month else default_calendar_month()
+                await state.update_data(cal_year=cal.year, cal_month=cal.month)
                 await state.set_state(BookingStates.picking_date)
                 await callback.message.edit_text(
                     f"😔 На {format_date_display(date_iso)} вже немає вільних місць.\n\n"
-                    "Оберіть іншу дату:",
-                    reply_markup=booking_date_keyboard(get_bookable_dates()),
+                    f"📅 <b>{cal.title}</b>\n\nОберіть іншу дату:",
+                    reply_markup=booking_calendar_keyboard(cal),
                     parse_mode="HTML",
                 )
             else:

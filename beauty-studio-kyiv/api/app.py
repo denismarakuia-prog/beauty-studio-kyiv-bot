@@ -94,16 +94,28 @@ def create_app(config: Config) -> FastAPI:
     # slash (some versions 307-redirect, some 404). An explicit route removes
     # all ambiguity: "/webapp" and "/webapp/" both deterministically return
     # the real HTML page with the correct content-type, every time.
+    #
+    # The HTML is read ONCE at startup (not per-request): this sidesteps any
+    # per-request disk-I/O hiccup, and the startup log line below makes a
+    # missing/misplaced file immediately visible in Render's deploy logs
+    # instead of silently producing a blank page for users.
+    try:
+        if _WEBAPP_INDEX.is_file():
+            _webapp_html = _WEBAPP_INDEX.read_text(encoding="utf-8")
+            logger.info(
+                "Mini App loaded OK: %s (%d bytes)", _WEBAPP_INDEX, len(_webapp_html)
+            )
+        else:
+            _webapp_html = "<h1>Mini App not found</h1><p>webapp/index.html is missing.</p>"
+            logger.error("Mini App index.html NOT FOUND at %s", _WEBAPP_INDEX)
+    except Exception as exc:
+        _webapp_html = f"<h1>Mini App failed to load</h1><p>{exc}</p>"
+        logger.error("Failed to read Mini App HTML: %s", exc)
+
     @app.get("/webapp", include_in_schema=False)
     @app.get("/webapp/", include_in_schema=False)
     async def webapp_index() -> HTMLResponse:
-        if not _WEBAPP_INDEX.is_file():
-            return HTMLResponse(
-                "<h1>Mini App not found</h1><p>webapp/index.html is missing.</p>",
-                status_code=404,
-            )
-        html = _WEBAPP_INDEX.read_text(encoding="utf-8")
-        return HTMLResponse(content=html, status_code=200)
+        return HTMLResponse(content=_webapp_html, status_code=200)
 
     # Mounted as a fallback for any future static assets (images, separate
     # css/js) placed under webapp/ — does not affect the explicit routes above.

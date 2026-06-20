@@ -15,7 +15,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from bot.salon_data import SERVICES
-from bot.services.scheduling_service import DateOption
+from bot.services.scheduling_service import CalendarMonth, encode_time
 
 
 # ── Reply-keyboard button labels (also used as exact-match filters) ───────────
@@ -38,11 +38,19 @@ MENU_BUTTON_LABELS = frozenset(
 
 
 # ── CallbackData schemas ───────────────────────────────────────────────────────
+#
+# IMPORTANT: aiogram's CallbackData.pack() raises ValueError if any field
+# value contains the ':' separator character. Time values ('09:00') and any
+# other colon-bearing value must NEVER be placed directly into a field below
+# — always run them through encode_time()/encode_month() first (see
+# scheduling_service.py). Dates ('2026-06-20') use '-' and are safe as-is.
 
 
 class BookingCallback(CallbackData, prefix="bk"):
-    action: str       # "start" | "service" | "date" | "time" | "confirm" | "back" | "cancel_flow"
-    value: str = ""    # service_id / date_iso / time_str / back-target, per action
+    # "start" | "service" | "cal_nav" | "date" | "time" | "confirm"
+    # | "back" | "cancel_flow" | "main_menu" | "noop"
+    action: str
+    value: str = ""    # service_id / month-code / date_iso / time-code / back-target
 
 
 class MyBookingCallback(CallbackData, prefix="mb"):
@@ -77,6 +85,19 @@ def contact_request_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
+# ── Shared row helpers ──────────────────────────────────────────────────────────
+
+_NOOP = BookingCallback(action="noop")
+_MAIN_MENU_BTN_TEXT = "🏠 Головне меню"
+
+
+def _add_nav_row(b: InlineKeyboardBuilder, *, back_target: str) -> None:
+    """⬅️ Назад · 🏠 Головне меню · ❌ Скасувати — present on every booking step."""
+    b.button(text="⬅️ Назад", callback_data=BookingCallback(action="back", value=back_target))
+    b.button(text=_MAIN_MENU_BTN_TEXT, callback_data=BookingCallback(action="main_menu"))
+    b.button(text="❌ Скасувати", callback_data=BookingCallback(action="cancel_flow"))
+
+
 # ── Booking flow — inline keyboards ─────────────────────────────────────────────
 
 
@@ -87,38 +108,65 @@ def booking_service_keyboard() -> InlineKeyboardMarkup:
             text=f"{svc.emoji} {svc.name}",
             callback_data=BookingCallback(action="service", value=svc.id),
         )
+    b.button(text=_MAIN_MENU_BTN_TEXT, callback_data=BookingCallback(action="main_menu"))
     b.button(text="❌ Скасувати", callback_data=BookingCallback(action="cancel_flow"))
-    b.adjust(1)
+    rows = [1] * len(SERVICES) + [1, 1]
+    b.adjust(*rows)
     return b.as_markup()
 
 
-def booking_date_keyboard(dates: List[DateOption]) -> InlineKeyboardMarkup:
+def booking_calendar_keyboard(cal: CalendarMonth) -> InlineKeyboardMarkup:
+    """Compact month-grid calendar with ◀️/▶️ navigation between bookable months."""
     b = InlineKeyboardBuilder()
-    for opt in dates:
-        b.button(
-            text=opt.label,
-            callback_data=BookingCallback(action="date", value=opt.iso),
-        )
-    b.button(text="⬅️ Назад", callback_data=BookingCallback(action="back", value="service"))
-    b.button(text="❌ Скасувати", callback_data=BookingCallback(action="cancel_flow"))
-    b.adjust(1)
+
+    # Navigation row: ◀️ | title | ▶️
+    if cal.has_prev:
+        b.button(text="◀️", callback_data=BookingCallback(action="cal_nav", value=cal.prev_code))
+    else:
+        b.button(text=" ", callback_data=_NOOP)
+    b.button(text=cal.title, callback_data=_NOOP)
+    if cal.has_next:
+        b.button(text="▶️", callback_data=BookingCallback(action="cal_nav", value=cal.next_code))
+    else:
+        b.button(text=" ", callback_data=_NOOP)
+
+    # Weekday header row
+    for wd in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]:
+        b.button(text=wd, callback_data=_NOOP)
+
+    # Day grid — 7 columns per week
+    for week in cal.weeks:
+        for day in week:
+            if day.iso:
+                b.button(text=day.label, callback_data=BookingCallback(action="date", value=day.iso))
+            else:
+                b.button(text=day.label or " ", callback_data=_NOOP)
+
+    _add_nav_row(b, back_target="service")
+
+    rows = [3, 7] + [7] * len(cal.weeks) + [1, 1, 1]
+    b.adjust(*rows)
     return b.as_markup()
 
 
 def booking_time_keyboard(times: List[str]) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for t in times:
-        b.button(text=f"🕐 {t}", callback_data=BookingCallback(action="time", value=t))
-    b.button(text="⬅️ Назад", callback_data=BookingCallback(action="back", value="date"))
-    b.button(text="❌ Скасувати", callback_data=BookingCallback(action="cancel_flow"))
+        # IMPORTANT: encode_time() strips the ':' — packing the raw "HH:MM"
+        # string here is exactly what caused the production crash
+        # (ValueError: Separator symbol ':' can not be used in value '09:00').
+        b.button(
+            text=f"🕐 {t}",
+            callback_data=BookingCallback(action="time", value=encode_time(t)),
+        )
+    _add_nav_row(b, back_target="date")
 
-    # Time buttons laid out 3 per row; back/cancel each get their own row.
-    # Row sizes are computed to sum EXACTLY to the total button count.
+    # Time buttons laid out 3 per row; nav row buttons each get their own row.
     n = len(times)
     rows = [3] * (n // 3)
     if n % 3:
         rows.append(n % 3)
-    rows += [1, 1]
+    rows += [1, 1, 1]
     b.adjust(*rows)
     return b.as_markup()
 
@@ -126,9 +174,8 @@ def booking_time_keyboard(times: List[str]) -> InlineKeyboardMarkup:
 def booking_confirm_keyboard() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="✅ Підтвердити запис", callback_data=BookingCallback(action="confirm"))
-    b.button(text="⬅️ Назад", callback_data=BookingCallback(action="back", value="time"))
-    b.button(text="❌ Скасувати", callback_data=BookingCallback(action="cancel_flow"))
-    b.adjust(1)
+    _add_nav_row(b, back_target="time")
+    b.adjust(1, 1, 1, 1)
     return b.as_markup()
 
 

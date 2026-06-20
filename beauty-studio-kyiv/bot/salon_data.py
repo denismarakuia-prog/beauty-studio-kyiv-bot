@@ -41,19 +41,26 @@ CLOSING_HOUR: int = 20
 # Length of one bookable slot, in minutes
 SLOT_STEP_MINUTES: int = 60
 
-# How many days ahead a client may book (today counts as day 0)
-BOOKING_WINDOW_DAYS: int = 14
+# How many full months ahead of the current month a client may book
+# (e.g. 4 = current month + 4 more = roughly 4-5 months of availability)
+CALENDAR_MONTHS_AHEAD: int = 4
 
 # Minimum lead time before a slot becomes bookable "today" (minutes from now)
 MIN_LEAD_TIME_MINUTES: int = 60
 
-# Ukrainian short weekday names (Mon=0 .. Sun=6), used in the date picker
+# Ukrainian short weekday names (Mon=0 .. Sun=6), used as the calendar header row
 WEEKDAYS_UA: List[str] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
 
-# Ukrainian month names (genitive form, for "20 червня")
+# Ukrainian month names — genitive form, for inline dates like "20 червня"
 MONTHS_UA: List[str] = [
     "січня", "лютого", "березня", "квітня", "травня", "червня",
     "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
+]
+
+# Ukrainian month names — nominative form, for calendar titles like "Червень 2026"
+MONTHS_UA_NOMINATIVE: List[str] = [
+    "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
+    "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень",
 ]
 
 

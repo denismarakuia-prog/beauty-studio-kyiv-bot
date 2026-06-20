@@ -1,21 +1,34 @@
 """
 Slot generation logic — pure functions, no I/O.
-Determines which dates are bookable and which times within a date are free,
-in the salon's local timezone (Europe/Kyiv), accounting for business hours,
-a minimum lead time, and already-taken slots.
+
+Two responsibilities:
+  1. Calendar grid generation (month-by-month, with prev/next navigation,
+     bounded to "today .. today + CALENDAR_MONTHS_AHEAD months").
+  2. Free time-slot computation for a chosen date, in the salon's local
+     timezone (Europe/Kyiv), accounting for business hours, a minimum lead
+     time, and already-taken slots.
+
+Time-slot values are also encoded/decoded here. aiogram's CallbackData.pack()
+rejects any field value containing the ':' separator character, so 'HH:MM'
+can never be placed directly into a callback_data field — it must be encoded
+as a separator-free token (e.g. '0900') for the wire, and decoded back to
+'09:00' the instant it's read out of a callback, before touching anything
+else (state, the database, notifications all keep using the real 'HH:MM'
+form — only the callback_data wire format is special).
 """
 from __future__ import annotations
 
+import calendar as _calendar
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import List
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 
 from bot.salon_data import (
-    BOOKING_WINDOW_DAYS,
+    CALENDAR_MONTHS_AHEAD,
     CLOSING_HOUR,
     MIN_LEAD_TIME_MINUTES,
-    MONTHS_UA,
+    MONTHS_UA_NOMINATIVE,
     OPENING_HOUR,
     SLOT_STEP_MINUTES,
     TIMEZONE_NAME,
@@ -23,6 +36,7 @@ from bot.salon_data import (
 )
 
 _TZ = ZoneInfo(TIMEZONE_NAME)
+_MONTH_CAL = _calendar.Calendar(firstweekday=0)  # weeks start Monday, matches WEEKDAYS_UA
 
 
 def now_local() -> datetime:
@@ -34,40 +48,128 @@ def today_local() -> date:
     return now_local().date()
 
 
-@dataclass(frozen=True)
-class DateOption:
-    iso: str          # 'YYYY-MM-DD' — stored in DB / used as callback payload
-    label: str        # 'Сьогодні', 'Завтра', or 'Пт, 26 черв.'
-
-
-def format_date_human(d: date) -> str:
-    """'Пт, 26 червня' style formatting in Ukrainian."""
-    weekday = WEEKDAYS_UA[d.weekday()]
-    month = MONTHS_UA[d.month - 1]
-    return f"{weekday}, {d.day} {month}"
-
-
 def format_date_display(iso_date: str) -> str:
     """'YYYY-MM-DD' -> 'DD.MM.YYYY' for messages shown to user/admin."""
     d = date.fromisoformat(iso_date)
     return d.strftime("%d.%m.%Y")
 
 
-def get_bookable_dates() -> List[DateOption]:
-    """All dates the client is allowed to pick from, today .. today+window."""
-    today = today_local()
-    options: List[DateOption] = []
-    for offset in range(BOOKING_WINDOW_DAYS):
-        d = today + timedelta(days=offset)
-        if offset == 0:
-            label = f"Сьогодні · {format_date_human(d)}"
-        elif offset == 1:
-            label = f"Завтра · {format_date_human(d)}"
-        else:
-            label = format_date_human(d)
-        options.append(DateOption(iso=d.isoformat(), label=label))
-    return options
+# ── Time encoding (callback-safe) ───────────────────────────────────────────────
 
+def encode_time(time_str: str) -> str:
+    """'09:00' -> '0900' — safe to place in a CallbackData field."""
+    return time_str.replace(":", "")
+
+
+def decode_time(code: str) -> str:
+    """'0900' -> '09:00'. Returns '' if the code doesn't look like 4 digits."""
+    code = code.strip()
+    if len(code) != 4 or not code.isdigit():
+        return ""
+    return f"{code[:2]}:{code[2:]}"
+
+
+# ── Month arithmetic ─────────────────────────────────────────────────────────────
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
+    idx = year * 12 + (month - 1) + delta
+    return idx // 12, idx % 12 + 1
+
+
+def encode_month(year: int, month: int) -> str:
+    """(2026, 6) -> '202606' — safe to place in a CallbackData field."""
+    return f"{year:04d}{month:02d}"
+
+
+def decode_month(code: str) -> Optional[tuple[int, int]]:
+    code = code.strip()
+    if len(code) != 6 or not code.isdigit():
+        return None
+    return int(code[:4]), int(code[4:6])
+
+
+# ── Calendar grid ────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CalendarDay:
+    iso: Optional[str]   # 'YYYY-MM-DD' if this cell is a selectable day, else None
+    label: str           # text shown on the button ('', '17', '20•' for today)
+
+
+@dataclass(frozen=True)
+class CalendarMonth:
+    year: int
+    month: int
+    title: str                     # 'Червень 2026'
+    weeks: List[List[CalendarDay]]  # each inner list has exactly 7 CalendarDay cells
+    has_prev: bool
+    has_next: bool
+    prev_code: str                  # encoded target month for the ◀️ button
+    next_code: str                  # encoded target month for the ▶️ button
+
+
+def _last_bookable_month() -> tuple[int, int]:
+    today = today_local()
+    return _shift_month(today.year, today.month, CALENDAR_MONTHS_AHEAD)
+
+
+def get_calendar_month(year: int, month: int) -> CalendarMonth:
+    """
+    Build a full month grid clamped to the bookable window:
+    [current month .. current month + CALENDAR_MONTHS_AHEAD].
+    Days outside that window (past days in the current month, or any day in
+    a month beyond the window) are rendered as non-selectable blanks.
+    """
+    today = today_local()
+    min_year, min_month = today.year, today.month
+    max_year, max_month = _last_bookable_month()
+
+    # Clamp the requested month into the valid window defensively (handles
+    # stale/forged callback data gracefully instead of crashing).
+    if (year, month) < (min_year, min_month):
+        year, month = min_year, min_month
+    elif (year, month) > (max_year, max_month):
+        year, month = max_year, max_month
+
+    weeks: List[List[CalendarDay]] = []
+    for week in _MONTH_CAL.monthdatescalendar(year, month):
+        row: List[CalendarDay] = []
+        for d in week:
+            if d.month != month:
+                row.append(CalendarDay(iso=None, label=""))
+                continue
+            if d < today:
+                row.append(CalendarDay(iso=None, label="·"))
+                continue
+            label = f"{d.day}•" if d == today else str(d.day)
+            row.append(CalendarDay(iso=d.isoformat(), label=label))
+        weeks.append(row)
+
+    has_prev = (year, month) > (min_year, min_month)
+    has_next = (year, month) < (max_year, max_month)
+    prev_y, prev_m = _shift_month(year, month, -1)
+    next_y, next_m = _shift_month(year, month, 1)
+
+    title = f"{MONTHS_UA_NOMINATIVE[month - 1]} {year}"
+
+    return CalendarMonth(
+        year=year,
+        month=month,
+        title=title,
+        weeks=weeks,
+        has_prev=has_prev,
+        has_next=has_next,
+        prev_code=encode_month(prev_y, prev_m),
+        next_code=encode_month(next_y, next_m),
+    )
+
+
+def default_calendar_month() -> CalendarMonth:
+    today = today_local()
+    return get_calendar_month(today.year, today.month)
+
+
+# ── Time slots ───────────────────────────────────────────────────────────────────
 
 def get_all_slot_times() -> List[str]:
     """All possible 'HH:MM' slots within business hours, ignoring bookings."""
