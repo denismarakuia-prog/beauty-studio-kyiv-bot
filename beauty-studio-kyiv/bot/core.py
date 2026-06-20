@@ -9,11 +9,14 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ErrorEvent
 
 from bot.config import Config
 from bot.database.repositories import UserRepository
 from bot.handlers import admin, ai_assistant, booking, contacts, menu, my_booking, start
+from bot.keyboards.builders import main_reply_keyboard
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_tracker import UserTrackerMiddleware
 
@@ -30,6 +33,51 @@ def create_bot_and_dispatcher(
     )
 
     dp = Dispatcher(storage=MemoryStorage())
+
+    # ── Global error handler ──────────────────────────────────────────────────
+    #
+    # ANY unhandled exception raised by ANY handler in ANY router (a bad
+    # callback payload, a DB hiccup, a stale message from a previous bot
+    # version, etc.) is caught HERE instead of silently dying. Without this,
+    # a callback_query whose handler raises never gets answered — Telegram
+    # shows the button stuck in its loading spinner forever, which is
+    # exactly the "booking hangs" symptom class. This guarantees: the
+    # spinner always clears, the FSM state is always reset to a clean
+    # slate, and the user always gets a real message with the main menu
+    # back, instead of dead silence.
+    @dp.errors()
+    async def global_error_handler(event: ErrorEvent, state: FSMContext) -> None:
+        logger.error(
+            "Unhandled exception while processing update %s: %s",
+            getattr(event.update, "update_id", "?"),
+            event.exception,
+            exc_info=event.exception,
+        )
+        try:
+            await state.clear()
+        except Exception:
+            pass
+
+        update = event.update
+        cq = update.callback_query
+        msg = update.message or (cq.message if cq else None)
+
+        if cq is not None:
+            try:
+                await cq.answer("Сталася помилка. Спробуйте ще раз.", show_alert=True)
+            except Exception:
+                pass
+
+        if msg is not None:
+            try:
+                await msg.answer(
+                    "⚠️ Сталася технічна помилка. Спробуйте, будь ласка, ще раз — "
+                    "натисніть «📅 Записатися» або скористайтесь меню нижче 👇",
+                    reply_markup=main_reply_keyboard(),
+                    parse_mode="HTML",
+                )
+            except Exception as exc:
+                logger.error("Error handler itself failed to notify the user: %s", exc)
 
     # ── Middlewares ──────────────────────────────────────────────────────────
     # IMPORTANT: registered as OUTER middleware, not inner.

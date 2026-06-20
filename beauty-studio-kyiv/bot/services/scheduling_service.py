@@ -49,8 +49,12 @@ def today_local() -> date:
 
 
 def format_date_display(iso_date: str) -> str:
-    """'YYYY-MM-DD' -> 'DD.MM.YYYY' for messages shown to user/admin."""
-    d = date.fromisoformat(iso_date)
+    """'YYYY-MM-DD' -> 'DD.MM.YYYY' for messages shown to user/admin.
+    Malformed input safely returns the original string rather than raising."""
+    try:
+        d = date.fromisoformat(iso_date)
+    except (ValueError, TypeError):
+        return iso_date
     return d.strftime("%d.%m.%Y")
 
 
@@ -188,12 +192,20 @@ def get_available_times(booking_date_iso: str, taken_times: List[str]) -> List[s
     Free 'HH:MM' slots for the given ISO date, excluding:
       - times already present in taken_times
       - (if the date is today) times within MIN_LEAD_TIME_MINUTES of now, or in the past
+
+    A malformed/empty date string (stale callback, corrupted state, etc.)
+    safely yields an empty list rather than raising — callers already treat
+    "no free slots" as a normal, handled case.
     """
+    try:
+        target_date = date.fromisoformat(booking_date_iso)
+    except (ValueError, TypeError):
+        return []
+
     all_slots = get_all_slot_times()
     taken = set(taken_times)
     free = [t for t in all_slots if t not in taken]
 
-    target_date = date.fromisoformat(booking_date_iso)
     if target_date == today_local():
         cutoff = now_local() + timedelta(minutes=MIN_LEAD_TIME_MINUTES)
         cutoff_minutes = cutoff.hour * 60 + cutoff.minute
@@ -206,17 +218,26 @@ def get_available_times(booking_date_iso: str, taken_times: List[str]) -> List[s
 
 
 def is_slot_still_valid(booking_date_iso: str, booking_time: str) -> bool:
-    """Final guard at confirmation time: re-verify the slot hasn't slipped into the past."""
-    target_date = date.fromisoformat(booking_date_iso)
+    """
+    Final guard at confirmation time: re-verify the slot hasn't slipped into
+    the past. Malformed input safely returns False (treated as "no longer
+    valid, please re-pick") rather than raising.
+    """
+    try:
+        target_date = date.fromisoformat(booking_date_iso)
+    except (ValueError, TypeError):
+        return False
+
     if target_date < today_local():
         return False
     if target_date > today_local():
         return True
 
+    try:
+        slot_time = datetime.strptime(booking_time, "%H:%M").time()
+    except (ValueError, TypeError):
+        return False
+
     cutoff = now_local() + timedelta(minutes=MIN_LEAD_TIME_MINUTES)
-    slot_dt = datetime.combine(
-        target_date,
-        datetime.strptime(booking_time, "%H:%M").time(),
-        tzinfo=_TZ,
-    )
+    slot_dt = datetime.combine(target_date, slot_time, tzinfo=_TZ)
     return slot_dt >= cutoff

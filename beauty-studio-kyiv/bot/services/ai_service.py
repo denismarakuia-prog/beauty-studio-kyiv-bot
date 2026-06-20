@@ -2,20 +2,23 @@
 AI assistant with three layers, in order:
   1. OpenAI (if a key is configured), with retries.
   2. A salon knowledge base — keyword-matched answers built directly from
-     salon_data.py (services, prices, hours, address, phones). This is what
-     guarantees normal salon questions are ALWAYS answered correctly even
-     if OpenAI is completely unavailable (wrong/expired key, no network
-     egress, quota exhausted, etc.) — production previously showed a generic
-     "can't answer" apology for every single message once OpenAI calls
-     started failing; that can no longer happen for recognisable questions.
-  3. A soft, still-helpful generic nudge — only reached for genuinely
-     unrecognised/off-topic input, never for a real salon question.
+     salon_data.py (services, prices, hours, address, phones). Keyword lists
+     deliberately mix Ukrainian, Russian, and common surzhyk spellings,
+     since clients write in whichever feels natural to them — matching is
+     purely on the INPUT side, the bot's own replies always stay in
+     Ukrainian. This is what guarantees normal salon questions are ALWAYS
+     answered correctly even if OpenAI is completely unavailable
+     (wrong/expired key, no network egress, quota exhausted, etc.).
+  3. A soft, still-helpful, ROTATING generic nudge — only reached for
+     genuinely unrecognised/off-topic input, never for a real salon
+     question, and never the exact same wording twice in a row.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import List, Optional
+from itertools import cycle
+from typing import Dict, List, Optional
 
 from bot.salon_data import (
     SALON_ABOUT,
@@ -39,7 +42,7 @@ _SYSTEM_PROMPT = f"""Ти — професійний та доброзичлив
 {chr(10).join(f"  – {s.emoji} {s.name}: {s.price}, {s.duration}" for s in SERVICES)}
 
 Правила спілкування:
-1. Відповідай ВИКЛЮЧНО українською мовою.
+1. Незалежно від мови запитання (українська, російська, суржик) — відповідай ВИКЛЮЧНО українською мовою.
 2. Відповідь — 3–5 речень максимум.
 3. Тон: тепло-професійний, як у реального адміністратора.
 4. При будь-якій нагоді ненав'язливо пропонуй записатися.
@@ -49,12 +52,64 @@ _SYSTEM_PROMPT = f"""Ти — професійний та доброзичлив
 
 # ── Salon knowledge base (OpenAI-independent fallback) ──────────────────────────
 
+_SERVICE_SYNONYMS: Dict[str, List[str]] = {
+    "manicure":    ["манікюр", "маникюр"],
+    "pedicure":    ["педикюр"],
+    "haircut":     ["стрижка", "стрижку", "стрижки", "підстригти", "подстричь", "постричься"],
+    "coloring":    ["фарбування", "фарбувати", "окрашивание", "покраска", "покрасить",
+                     "краска волос", "пофарбувати"],
+    "cosmetology": ["косметологія", "косметология", "чистка обличчя", "чистка лица",
+                     "пілінг", "пилинг"],
+}
+
+_PRICE_KW = (
+    "ціна", "цін", "прайс", "коштує", "вартість", "скільки",
+    "цена", "стоит", "стоимост", "сколько", "почем",
+)
+
+_HOURS_KW = (
+    "час роботи", "графік", "коли працю", "відкрит", "закрит", "робочі години",
+    "до якої", "з якої",
+    "часы работы", "график", "когда работа", "когда вы работ", "открыт", "закрыт",
+    "рабочие часы", "до которого", "со скольки", "до скольки",
+)
+
+_ADDRESS_KW = (
+    "адрес", "де ви", "де знаходит", "локац", "як доїхати", "де салон", "де ти",
+    "где вы", "где находит", "как доехать",
+)
+
+_PHONE_KW = (
+    "телефон", "номер", "зв'язатися", "зателефонувати", "контакт",
+    "связаться", "позвонить", "позвонити",
+)
+
+_BOOKING_KW = (
+    "запис", "забронюва", "хочу прийти", "можна прийти", "вільний час",
+    "вільне місце", "вільн",
+    "запись", "забронировать", "свободное время", "свободно", "свободн",
+    "можно прийти", "хочу записаться",
+)
+
+_ABOUT_KW = (
+    "хто ви", "про салон", "розкажіть про", "історія", "давно працю",
+    "кто вы", "о салоне", "расскажите о", "история", "давно работа",
+)
+
+_GREETING_KW = (
+    "привіт", "добрий день", "вітаю", "доброго дня",
+    "привет", "добрый день", "здравствуйте", "хай",
+    "hi", "hello",
+)
+
+
 def _knowledge_base_answer(question: str) -> Optional[str]:
     q = question.lower()
 
-    # Specific service mentioned -> its own detailed card (most specific, checked first)
+    # Specific service mentioned -> its own detailed card (checked first, most specific)
     for svc in SERVICES:
-        if svc.name.lower() in q or svc.id in q:
+        synonyms = _SERVICE_SYNONYMS.get(svc.id, [svc.name.lower()])
+        if any(syn in q for syn in synonyms):
             return (
                 f"{svc.emoji} <b>{svc.name}</b>\n\n"
                 f"{svc.description}\n\n"
@@ -63,41 +118,33 @@ def _knowledge_base_answer(question: str) -> Optional[str]:
                 "Натисніть «📅 Записатися», щоб обрати дату й час! 💕"
             )
 
-    if any(kw in q for kw in ("ціна", "цін", "прайс", "коштує", "вартість", "скільки")):
+    if any(kw in q for kw in _PRICE_KW):
         lines = [f"💰 <b>Прайс-лист — {SALON_NAME}</b>\n"]
         for s in SERVICES:
             lines.append(f"{s.emoji} {s.name}: {s.price}")
         lines.append("\nНатисніть «💰 Прайс» у меню, щоб побачити деталі!")
         return "\n".join(lines)
 
-    if any(kw in q for kw in (
-        "час роботи", "графік", "коли працю", "відкрит", "закрит",
-        "робочі години", "до якої", "з якої",
-    )):
+    if any(kw in q for kw in _HOURS_KW):
         return f"🕐 Ми працюємо: <b>{SALON_HOURS}</b>\n\nЧекаємо на вас! 💕"
 
-    if any(kw in q for kw in (
-        "адрес", "де ви", "де знаходит", "локац", "як доїхати", "де салон", "де ти",
-    )):
+    if any(kw in q for kw in _ADDRESS_KW):
         return f"📍 Ми знаходимось:\n<b>{SALON_ADDRESS}</b>\n\nБудемо раді бачити вас! 💕"
 
-    if any(kw in q for kw in ("телефон", "номер", "зв'язатися", "зателефонувати", "контакт")):
+    if any(kw in q for kw in _PHONE_KW):
         phones = "\n".join(f"📞 {p}" for p in SALON_PHONES)
         return f"Зв'яжіться з нами:\n{phones}\n\nАбо просто натисніть «📅 Записатися»! 💕"
 
-    if any(kw in q for kw in (
-        "запис", "забронюва", "хочу прийти", "можна прийти",
-        "вільний час", "вільне місце", "вільн",
-    )):
+    if any(kw in q for kw in _BOOKING_KW):
         return (
             "Звичайно! Натисніть кнопку «📅 Записатися» в меню нижче — "
             "оберете послугу, дату й час за кілька секунд! ✨"
         )
 
-    if any(kw in q for kw in ("хто ви", "про салон", "розкажіть про", "історія", "давно працю")):
+    if any(kw in q for kw in _ABOUT_KW):
         return f"ℹ️ <b>{SALON_NAME}</b>\n\n{SALON_ABOUT}"
 
-    if any(kw in q for kw in ("привіт", "добрий день", "вітаю", "доброго дня", "hi", "hello")):
+    if any(kw in q for kw in _GREETING_KW):
         return (
             f"Привіт! 👋 Раді бачити вас у {SALON_NAME}!\n\n"
             "Запитайте про послуги, ціни або натисніть «📅 Записатися», "
@@ -107,12 +154,20 @@ def _knowledge_base_answer(question: str) -> Optional[str]:
     return None
 
 
-def _generic_nudge() -> str:
-    return (
-        "На жаль, я не знайшов точної відповіді на ваше запитання 🙏\n\n"
-        "Спробуйте кнопки меню — «💰 Прайс», «📍 Контакти» — або натисніть "
-        "«📅 Записатися», і наш майстер відповість особисто! 💕"
-    )
+# Several distinct phrasings, rotated — guarantees a genuinely unrecognised
+# question is never met with the exact same canned line every single time.
+_GENERIC_NUDGES = cycle([
+    "На жаль, я не знайшов точної відповіді на ваше запитання 🙏\n\n"
+    "Спробуйте кнопки меню — «💰 Прайс», «📍 Контакти» — або натисніть "
+    "«📅 Записатися», і наш майстер відповість особисто! 💕",
+
+    "Хм, не зовсім зрозумів(ла) питання 🙂 Можливо, вас цікавлять послуги, "
+    "ціни чи графік роботи? Або просто натисніть «📅 Записатися» — "
+    "адміністратор детально все розповість! ✨",
+
+    "Вибачте, я спеціалізуюсь саме на питаннях про салон 💅 Запитайте про "
+    "послуги, прайс чи контакти — або скористайтеся кнопками меню нижче 👇",
+])
 
 
 class AIService:
@@ -174,4 +229,4 @@ class AIService:
         if kb_answer:
             return kb_answer
 
-        return _generic_nudge()
+        return next(_GENERIC_NUDGES)

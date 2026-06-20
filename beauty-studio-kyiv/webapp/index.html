@@ -77,8 +77,14 @@
     .fade-in-3 { animation: fadeUp 0.7s 0.30s var(--transition) both; }
 
     /* ── Intersection observer reveal ────────────────────────────────────── */
-    .reveal { opacity: 0; transform: translateY(32px); transition: opacity 0.6s ease, transform 0.6s ease; }
-    .reveal.visible { opacity: 1; transform: translateY(0); }
+    /* IMPORTANT: .reveal itself carries NO visual effect — it is only a marker.
+       The hidden-until-visible state is applied SOLELY by .reveal-active, which
+       JS adds at runtime right before observing each element. This guarantees
+       content is visible by default even if the script fails to run at all
+       (slow network, blocked external SDK script, WebView quirk, etc.) —
+       animation is a pure enhancement, never a requirement for visibility. */
+    .reveal-active { opacity: 0; transform: translateY(32px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal-active.visible { opacity: 1; transform: translateY(0); }
 
     /* ── Header ──────────────────────────────────────────────────────────── */
     .site-header {
@@ -747,16 +753,26 @@
     });
 
     // ── Intersection observer for .reveal elements ──────────────────────
-    const io = new IntersectionObserver(
-      (entries) => entries.forEach(e => {
-        if (e.isIntersecting) {
-          e.target.classList.add('visible');
-          io.unobserve(e.target);
-        }
-      }),
-      { threshold: 0.12 }
-    );
-    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+    // Wrapped in try/catch: if anything here fails (older engine, etc.),
+    // content simply stays at its default fully-visible state — it never
+    // depends on this block succeeding.
+    try {
+      const io = new IntersectionObserver(
+        (entries) => entries.forEach(e => {
+          if (e.isIntersecting) {
+            e.target.classList.add('visible');
+            io.unobserve(e.target);
+          }
+        }),
+        { threshold: 0.12 }
+      );
+      document.querySelectorAll('.reveal').forEach(el => {
+        el.classList.add('reveal-active');
+        io.observe(el);
+      });
+    } catch (err) {
+      // Animation enhancement failed — content remains visible regardless.
+    }
   </script>
 </body>
 </html>
