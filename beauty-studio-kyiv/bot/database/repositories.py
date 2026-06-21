@@ -75,6 +75,24 @@ class UserRepository:
                 row = await cur.fetchone()
                 return dict(row) if row else None
 
+    async def save_name(self, telegram_id: int, full_name: str) -> None:
+        """Permanently store the explicitly-typed display name for this user."""
+        async with aiosqlite.connect(self._path) as db:
+            await db.execute(
+                """
+                INSERT INTO users (telegram_id, full_name)
+                VALUES (?, ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET
+                    full_name = excluded.full_name
+                """,
+                (telegram_id, full_name),
+            )
+            await db.commit()
+
+    async def has_name(self, telegram_id: int) -> bool:
+        user = await self.get_user(telegram_id)
+        return bool(user and user.get("full_name"))
+
     async def has_phone(self, telegram_id: int) -> bool:
         user = await self.get_user(telegram_id)
         return bool(user and user.get("phone"))

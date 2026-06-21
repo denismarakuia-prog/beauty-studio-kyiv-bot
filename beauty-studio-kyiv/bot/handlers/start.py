@@ -11,7 +11,7 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.keyboards.builders import main_reply_keyboard
+from bot.keyboards.builders import EMPTY_KEYBOARD, main_reply_keyboard
 from bot.salon_data import SALON_NAME
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,12 @@ async def fallback_callback(callback: CallbackQuery, state: FSMContext) -> None:
     is not handled"), and exactly the mechanism behind reports of the
     booking flow silently "hanging" on a stale screen. Registered LAST so
     every more specific handler always gets first refusal.
+
+    Also strips the stale message's own inline keyboard (editMessageText
+    does NOT clear an old keyboard just because a handler didn't touch it —
+    confirmed in production logs as repeated taps on the very same stale
+    button), so this message self-disarms permanently after the first tap
+    instead of staying tappable forever.
     """
     logger.warning(
         "Unhandled callback_query from user %s: data=%r — answering gracefully.",
@@ -84,6 +90,10 @@ async def fallback_callback(callback: CallbackQuery, state: FSMContext) -> None:
             "Ця кнопка більше не активна. Скористайтесь меню нижче 👇",
             show_alert=True,
         )
+    except Exception:
+        pass
+    try:
+        await callback.message.edit_reply_markup(reply_markup=EMPTY_KEYBOARD)
     except Exception:
         pass
     try:

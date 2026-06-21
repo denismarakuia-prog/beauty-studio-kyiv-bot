@@ -11,6 +11,7 @@ from bot.config import Config
 from bot.database.repositories import BookingRepository
 from bot.keyboards.builders import (
     BTN_MY_BOOKING,
+    EMPTY_KEYBOARD,
     MyBookingCallback,
     book_now_keyboard,
     my_booking_confirm_cancel_keyboard,
@@ -84,7 +85,7 @@ async def cb_cancel_ask(
     if not booking or booking["id"] != booking_id:
         await callback.answer("Цей запис вже не активний", show_alert=True)
         try:
-            await callback.message.edit_text("📖 У вас немає активних записів.")
+            await callback.message.edit_text("📖 У вас немає активних записів.", reply_markup=EMPTY_KEYBOARD)
         except Exception:
             pass
         return
@@ -116,7 +117,7 @@ async def cb_cancel_no(
         return
 
     if not booking:
-        await callback.message.edit_text("📖 У вас немає активних записів.")
+        await callback.message.edit_text("📖 У вас немає активних записів.", reply_markup=EMPTY_KEYBOARD)
         await callback.answer()
         return
 
@@ -153,7 +154,7 @@ async def cb_cancel_yes(
     if not cancelled:
         await callback.answer("Цей запис вже скасовано", show_alert=True)
         try:
-            await callback.message.edit_text("📖 У вас немає активних записів.")
+            await callback.message.edit_text("📖 У вас немає активних записів.", reply_markup=EMPTY_KEYBOARD)
         except Exception:
             pass
         return
@@ -177,6 +178,7 @@ async def cb_cancel_yes(
         "✅ <b>Запис скасовано</b>\n\n"
         "Будемо раді бачити вас знову! Натисніть «📅 Записатися», "
         "щоб обрати новий час.",
+        reply_markup=EMPTY_KEYBOARD,
         parse_mode="HTML",
     )
     await callback.answer("Скасовано")

@@ -66,12 +66,19 @@ class BookingCallback(CallbackData, prefix="bk"):
     # "start" | "service" | "cal_nav" | "date" | "time" | "confirm"
     # | "back" | "cancel_flow" | "main_menu" | "noop"
     action: str
-    value: str = ""    # service_id / month-code / date_iso / time-code / back-target
+    value: str = "x"    # service_id / month-code / date_iso / time-code / back-target
+    # NOTE: default is "x", never "". A real production incident showed every
+    # callback packed with an EMPTY value field (e.g. 'bk:cancel_flow:') being
+    # silently unmatched by its own handler's filter and falling through to
+    # the catch-all — confirmed live from server logs ("is not handled") for
+    # cancel_flow/confirm/main_menu specifically, the only actions that never
+    # pass an explicit value. Using a harmless non-empty placeholder sidesteps
+    # the issue entirely; none of those handlers ever read `.value` anyway.
 
 
 class MyBookingCallback(CallbackData, prefix="mb"):
     action: str        # "cancel_ask" | "cancel_yes" | "cancel_no"
-    booking_id: str = ""
+    booking_id: str = "0"
 
 
 # ── Persistent reply keyboard (always visible) ─────────────────────────────────
@@ -103,6 +110,16 @@ def contact_request_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_ABOUT), KeyboardButton(text=BTN_MY_BOOKING)],
     ]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+# Pass this explicitly to edit_text(reply_markup=...) on any message that
+# should become non-interactive (booking cancelled, confirmed, expired,
+# etc). editMessageText does NOT clear an existing inline keyboard just
+# because reply_markup is omitted from the call — Telegram leaves the old
+# buttons fully clickable. An empty markup is the only way to actually
+# remove them. Confirmed in production: messages left without this kept
+# their old ✅/⬅️/❌ buttons live, so users re-tapped a finished flow.
+EMPTY_KEYBOARD = InlineKeyboardMarkup(inline_keyboard=[])
 
 
 # ── Shared row helpers ──────────────────────────────────────────────────────────

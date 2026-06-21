@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     username    TEXT,
     first_name  TEXT,
     last_name   TEXT,
+    full_name   TEXT,        -- explicitly typed by the user during booking (authoritative)
     phone       TEXT,
     is_blocked  INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
@@ -52,6 +53,23 @@ CREATE INDEX IF NOT EXISTS idx_bookings_created_at ON bookings (created_at);
 """
 
 
+async def _migrate_schema(db: aiosqlite.Connection) -> None:
+    """
+    Defensive migration for columns added after the initial schema.
+    CREATE TABLE IF NOT EXISTS only applies to brand-new databases — an
+    already-deployed users table needs an explicit ALTER TABLE to gain a
+    newly added column. Safe to run on every startup: checks first, only
+    alters if the column is actually missing.
+    """
+    async with db.execute("PRAGMA table_info(users)") as cur:
+        columns = {row[1] for row in await cur.fetchall()}
+
+    if "full_name" not in columns:
+        logger.info("Migrating schema: adding users.full_name column")
+        await db.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+        await db.commit()
+
+
 async def init_db(db_path: str) -> None:
     """
     Ensure the database directory exists and run the schema.
@@ -65,5 +83,6 @@ async def init_db(db_path: str) -> None:
         await db.execute("PRAGMA foreign_keys=ON;")
         await db.executescript(_SCHEMA)
         await db.commit()
+        await _migrate_schema(db)
 
     logger.info("Database ready: %s", db_path)

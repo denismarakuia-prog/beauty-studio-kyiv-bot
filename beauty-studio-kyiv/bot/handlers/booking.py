@@ -2,7 +2,7 @@
 Fully click-driven booking flow:
 
     📅 Записатися
-      ↓ (contact collected once, then skipped forever)
+      ↓ (ім'я та телефон зібрані один раз, далі не питаються)
     Послуга  →  Дата (compact calendar, multi-month)  →  Вільний час  →  Підтвердження
 
 Every step is an inline keyboard — no manual typing of dates/times anywhere.
@@ -36,6 +36,7 @@ from bot.config import Config
 from bot.database.repositories import BookingRepository, SlotTakenError, UserRepository
 from bot.keyboards.builders import (
     BTN_BOOK,
+    EMPTY_KEYBOARD,
     MENU_BUTTON_LABELS,
     BookingCallback,
     booking_calendar_keyboard,
@@ -69,6 +70,7 @@ MAX_SESSION_SECONDS = 30 * 60
 
 
 class BookingStates(StatesGroup):
+    waiting_name    = State()
     waiting_contact = State()
     picking_service = State()
     picking_date    = State()
@@ -89,10 +91,13 @@ def _service_name(service_id: str) -> str:
 
 
 def _full_name(user_row: dict) -> str:
+    full = (user_row.get("full_name") or "").strip()
+    if full:
+        return full
     first = (user_row.get("first_name") or "").strip()
     last = (user_row.get("last_name") or "").strip()
-    full = f"{first} {last}".strip()
-    return full or "Клієнт"
+    combined = f"{first} {last}".strip()
+    return combined or "Клієнт"
 
 
 def _session_fresh(data: dict) -> bool:
@@ -116,12 +121,43 @@ def _build_confirmation_text(user_row: dict, service_id: str, date_iso: str, tim
 
 async def _expire_session(message: Message, state: FSMContext) -> None:
     await state.clear()
+    try:
+        await message.edit_reply_markup(reply_markup=EMPTY_KEYBOARD)
+    except Exception:
+        pass
     await message.answer(
         "⏳ <b>Час сесії вичерпано</b>\n\n"
         "Будь ласка, розпочніть запис знову — натисніть «📅 Записатися» нижче.",
         reply_markup=main_reply_keyboard(),
         parse_mode="HTML",
     )
+
+
+async def _proceed_to_service_or_calendar(
+    message: Message, state: FSMContext, preselected_service_id: str
+) -> None:
+    """Shared tail: once name AND phone are both confirmed on file, go
+    straight to the calendar (if a service was already chosen, e.g. via the
+    Mini App) or show the service picker."""
+    if preselected_service_id and preselected_service_id in SERVICES_MAP:
+        await state.update_data(service_id=preselected_service_id, started_at=time.time())
+        cal = default_calendar_month()
+        await state.update_data(cal_year=cal.year, cal_month=cal.month)
+        await state.set_state(BookingStates.picking_date)
+        await message.answer(
+            f"✅ Послуга: <b>{_service_label(preselected_service_id)}</b>\n\n"
+            f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
+            reply_markup=booking_calendar_keyboard(cal),
+            parse_mode="HTML",
+        )
+    else:
+        await state.update_data(started_at=time.time())
+        await state.set_state(BookingStates.picking_service)
+        await message.answer(
+            "💄 <b>Оберіть послугу:</b>",
+            reply_markup=booking_service_keyboard(),
+            parse_mode="HTML",
+        )
 
 
 async def _begin_booking_flow(
@@ -157,7 +193,28 @@ async def _begin_booking_flow(
         )
         return
 
-    # 2 — contact guard
+    # 2 — name guard (explicitly typed, asked exactly once and stored)
+    try:
+        has_name = await user_repo.has_name(user_id)
+    except Exception as exc:
+        logger.error("DB error checking name: %s", exc)
+        has_name = False
+
+    if not has_name:
+        await state.set_state(BookingStates.waiting_name)
+        await state.update_data(
+            preselected_service_id=preselected_service_id,
+            started_at=time.time(),
+        )
+        await message.answer(
+            "👤 <b>Як до вас звертатися?</b>\n\n"
+            "Введіть, будь ласка, ваше ім'я та прізвище:",
+            reply_markup=main_reply_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    # 3 — contact guard
     try:
         has_phone = await user_repo.has_phone(user_id)
     except Exception as exc:
@@ -179,26 +236,8 @@ async def _begin_booking_flow(
         )
         return
 
-    # 3 — service picker (or skip straight to the calendar if pre-selected)
-    if preselected_service_id and preselected_service_id in SERVICES_MAP:
-        await state.update_data(service_id=preselected_service_id, started_at=time.time())
-        cal = default_calendar_month()
-        await state.update_data(cal_year=cal.year, cal_month=cal.month)
-        await state.set_state(BookingStates.picking_date)
-        await message.answer(
-            f"✅ Послуга: <b>{_service_label(preselected_service_id)}</b>\n\n"
-            f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
-            reply_markup=booking_calendar_keyboard(cal),
-            parse_mode="HTML",
-        )
-    else:
-        await state.update_data(started_at=time.time())
-        await state.set_state(BookingStates.picking_service)
-        await message.answer(
-            "💄 <b>Оберіть послугу:</b>",
-            reply_markup=booking_service_keyboard(),
-            parse_mode="HTML",
-        )
+    # 4 — both on file: service picker (or skip straight to the calendar)
+    await _proceed_to_service_or_calendar(message, state, preselected_service_id)
 
 
 # ── Entry points ───────────────────────────────────────────────────────────────
@@ -248,7 +287,7 @@ async def cb_noop(callback: CallbackQuery) -> None:
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     try:
-        await callback.message.edit_text("🏠 Головне меню")
+        await callback.message.edit_text("🏠 Головне меню", reply_markup=EMPTY_KEYBOARD)
     except Exception:
         pass
     await callback.message.answer(
@@ -256,6 +295,62 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
         reply_markup=main_reply_keyboard(),
     )
     await callback.answer()
+
+
+# ── Step: name collection ───────────────────────────────────────────────────────
+
+@router.message(BookingStates.waiting_name, F.text, ~F.text.in_(MENU_BUTTON_LABELS))
+async def step_name(
+    message: Message, state: FSMContext, user_repo: UserRepository
+) -> None:
+    name = (message.text or "").strip()
+    if len(name) < 2:
+        await message.answer(
+            "⚠️ Будь ласка, введіть коректне ім'я (мінімум 2 символи):"
+        )
+        return
+
+    user_id = message.from_user.id if message.from_user else message.chat.id
+    try:
+        await user_repo.save_name(telegram_id=user_id, full_name=name)
+    except Exception as exc:
+        logger.error("Failed to save name: %s", exc)
+        await message.answer(
+            "⚠️ Сталася помилка під час збереження імені. Спробуйте ще раз."
+        )
+        return
+
+    data = await state.get_data()
+    preselected = data.get("preselected_service_id", "")
+
+    try:
+        has_phone = await user_repo.has_phone(user_id)
+    except Exception as exc:
+        logger.error("DB error checking phone: %s", exc)
+        has_phone = False
+
+    if not has_phone:
+        await state.set_state(BookingStates.waiting_contact)
+        await message.answer(
+            f"✅ Дякуємо, {name}!\n\n"
+            "📱 Тепер поділіться, будь ласка, номером телефону — "
+            "натисніть кнопку нижче. Більше просити не будемо 🙂",
+            reply_markup=contact_request_keyboard(),
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(f"✅ Дякуємо, {name}!", reply_markup=main_reply_keyboard())
+        await _proceed_to_service_or_calendar(message, state, preselected)
+
+
+@router.message(BookingStates.waiting_name, F.contact)
+async def step_name_got_contact_instead(message: Message) -> None:
+    """Defensive: a contact arriving while we expect a typed name (e.g. a
+    leftover share-contact button from a previous session) should nudge the
+    user back to typing rather than being silently dropped."""
+    await message.answer(
+        "👤 Будь ласка, спочатку введіть текстом ваше ім'я та прізвище:"
+    )
 
 
 # ── Step: contact collection ───────────────────────────────────────────────────
@@ -296,25 +391,7 @@ async def step_contact(
     preselected = data.get("preselected_service_id", "")
 
     await message.answer("✅ Дякуємо! Номер збережено.", reply_markup=main_reply_keyboard())
-
-    if preselected and preselected in SERVICES_MAP:
-        await state.update_data(service_id=preselected)
-        cal = default_calendar_month()
-        await state.update_data(cal_year=cal.year, cal_month=cal.month)
-        await state.set_state(BookingStates.picking_date)
-        await message.answer(
-            f"💄 Послуга: <b>{_service_label(preselected)}</b>\n\n"
-            f"📅 <b>{cal.title}</b>\n\nОберіть дату:",
-            reply_markup=booking_calendar_keyboard(cal),
-            parse_mode="HTML",
-        )
-    else:
-        await state.set_state(BookingStates.picking_service)
-        await message.answer(
-            "💄 Оберіть послугу:",
-            reply_markup=booking_service_keyboard(),
-            parse_mode="HTML",
-        )
+    await _proceed_to_service_or_calendar(message, state, preselected)
 
 
 @router.message(BookingStates.waiting_contact, F.text, ~F.text.in_(MENU_BUTTON_LABELS))
@@ -499,7 +576,8 @@ async def cb_pick_time(
         await state.clear()
         await callback.message.edit_text(
             "⚠️ Сталася помилка з вашими контактними даними. "
-            "Будь ласка, розпочніть запис знову — «📅 Записатися»."
+            "Будь ласка, розпочніть запис знову — «📅 Записатися».",
+            reply_markup=EMPTY_KEYBOARD,
         )
         await callback.answer()
         return
@@ -578,7 +656,8 @@ async def cb_confirm(
         await state.clear()
         await callback.message.edit_text(
             "⚠️ Сталася помилка з вашими контактними даними. "
-            "Будь ласка, розпочніть запис знову — «📅 Записатися»."
+            "Будь ласка, розпочніть запис знову — «📅 Записатися».",
+            reply_markup=EMPTY_KEYBOARD,
         )
         await callback.answer()
         return
@@ -651,6 +730,7 @@ async def cb_confirm(
         f"⏰ {time_str}\n\n"
         "Чекаємо на вас! За потреби запис можна переглянути або скасувати "
         "в розділі «📖 Мій запис».",
+        reply_markup=EMPTY_KEYBOARD,
         parse_mode="HTML",
     )
     await callback.answer("Запис підтверджено! ✅")
@@ -738,7 +818,7 @@ async def cb_back(
 async def cb_cancel_flow(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     try:
-        await callback.message.edit_text("❌ Запис скасовано.")
+        await callback.message.edit_text("❌ Запис скасовано.", reply_markup=EMPTY_KEYBOARD)
     except Exception:
         pass
     await callback.answer("Скасовано")

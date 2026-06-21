@@ -16,7 +16,7 @@ from aiogram.types import ErrorEvent
 from bot.config import Config
 from bot.database.repositories import UserRepository
 from bot.handlers import admin, ai_assistant, booking, contacts, menu, my_booking, start
-from bot.keyboards.builders import main_reply_keyboard, set_webapp_url
+from bot.keyboards.builders import EMPTY_KEYBOARD, main_reply_keyboard, set_webapp_url
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_tracker import UserTrackerMiddleware
 
@@ -67,6 +67,10 @@ def create_bot_and_dispatcher(
         if cq is not None:
             try:
                 await cq.answer("Сталася помилка. Спробуйте ще раз.", show_alert=True)
+            except Exception:
+                pass
+            try:
+                await cq.message.edit_reply_markup(reply_markup=EMPTY_KEYBOARD)
             except Exception:
                 pass
 
