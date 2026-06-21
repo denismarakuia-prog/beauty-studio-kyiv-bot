@@ -19,7 +19,10 @@ services:
       - key: DATABASE_PATH
         value: /app/data/beauty_studio.db
 
-      # After first deploy, set to: https://<your-service>.onrender.com/webapp
+      # After first deploy, set to your service's base URL, e.g.:
+      #   https://<your-service>.onrender.com
+      # (the app automatically appends /webapp if you don't include it,
+      # so either the bare domain or the full /webapp URL works correctly)
       - key: WEBAPP_URL
         sync: false
 

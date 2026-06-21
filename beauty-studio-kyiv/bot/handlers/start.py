@@ -9,7 +9,7 @@ import logging
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards.builders import main_reply_keyboard
 from bot.salon_data import SALON_NAME
@@ -51,3 +51,45 @@ async def fallback_text(message: Message, state: FSMContext) -> None:
         reply_markup=main_reply_keyboard(),
         parse_mode="HTML",
     )
+
+
+@router.callback_query()
+async def fallback_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """
+    Global catch-all for any callback_query that matched NO handler anywhere
+    in the router tree — e.g. a stale inline button left over from a
+    previous bot version/session, corrupted callback_data, or any future
+    routing gap.
+
+    This is critical: when a callback_query's data matches no registered
+    filter, aiogram does NOT raise an exception (so the global @dp.error()
+    handler never fires) — it just silently logs "is not handled" and moves
+    on. Telegram's client then leaves that button's loading spinner with no
+    answer at all. Confirmed directly from production logs ("Update id=...
+    is not handled"), and exactly the mechanism behind reports of the
+    booking flow silently "hanging" on a stale screen. Registered LAST so
+    every more specific handler always gets first refusal.
+    """
+    logger.warning(
+        "Unhandled callback_query from user %s: data=%r — answering gracefully.",
+        callback.from_user.id if callback.from_user else "?",
+        callback.data,
+    )
+    try:
+        await state.clear()
+    except Exception:
+        pass
+    try:
+        await callback.answer(
+            "Ця кнопка більше не активна. Скористайтесь меню нижче 👇",
+            show_alert=True,
+        )
+    except Exception:
+        pass
+    try:
+        await callback.message.answer(
+            "Будь ласка, скористайтесь кнопками на клавіатурі нижче 👇",
+            reply_markup=main_reply_keyboard(),
+        )
+    except Exception as exc:
+        logger.error("fallback_callback could not message the user: %s", exc)

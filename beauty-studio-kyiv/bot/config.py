@@ -58,7 +58,11 @@ class Config:
         openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         openai_model   = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip()
         db_path        = os.environ.get("DATABASE_PATH", "./data/beauty_studio.db").strip()
-        webapp_url     = os.environ.get("WEBAPP_URL", "").strip()
+        webapp_url = os.environ.get("WEBAPP_URL", "").strip()
+        if webapp_url:
+            webapp_url = webapp_url.rstrip("/")
+            if not webapp_url.endswith("/webapp"):
+                webapp_url = f"{webapp_url}/webapp"
 
         port_str = os.environ.get("PORT", "8000").strip()
         try:
