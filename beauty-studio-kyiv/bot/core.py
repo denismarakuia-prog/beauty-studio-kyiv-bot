@@ -16,7 +16,7 @@ from aiogram.types import ErrorEvent
 from bot.config import Config
 from bot.database.repositories import UserRepository
 from bot.handlers import admin, ai_assistant, booking, contacts, menu, my_booking, start
-from bot.keyboards.builders import main_reply_keyboard
+from bot.keyboards.builders import main_reply_keyboard, set_webapp_url
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_tracker import UserTrackerMiddleware
 
@@ -27,6 +27,8 @@ def create_bot_and_dispatcher(
     config: Config,
     user_repo: UserRepository,
 ) -> tuple[Bot, Dispatcher]:
+    set_webapp_url(config.webapp_url)
+
     bot = Bot(
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -45,7 +47,7 @@ def create_bot_and_dispatcher(
     # spinner always clears, the FSM state is always reset to a clean
     # slate, and the user always gets a real message with the main menu
     # back, instead of dead silence.
-    @dp.errors()
+    @dp.error()
     async def global_error_handler(event: ErrorEvent, state: FSMContext) -> None:
         logger.error(
             "Unhandled exception while processing update %s: %s",

@@ -11,11 +11,27 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.salon_data import SERVICES
 from bot.services.scheduling_service import CalendarMonth, encode_time
+
+
+# ── Mini App URL (set once at startup by core.py, read by main_reply_keyboard) ─
+#
+# Avoids threading `config`/`webapp_url` through every single handler
+# signature across the whole project just to render one optional button —
+# this is set ONCE when the bot starts and read here whenever the main
+# keyboard is built.
+
+_webapp_url: str = ""
+
+
+def set_webapp_url(url: str) -> None:
+    global _webapp_url
+    _webapp_url = url or ""
 
 
 # ── Reply-keyboard button labels (also used as exact-match filters) ───────────
@@ -62,15 +78,19 @@ class MyBookingCallback(CallbackData, prefix="mb"):
 
 
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
-    b = ReplyKeyboardBuilder()
-    b.button(text=BTN_BOOK)
-    b.button(text=BTN_PRICE)
-    b.button(text=BTN_CONTACTS)
-    b.button(text=BTN_AI)
-    b.button(text=BTN_ABOUT)
-    b.button(text=BTN_MY_BOOKING)
-    b.adjust(2, 2, 2)
-    return b.as_markup(resize_keyboard=True, is_persistent=True)
+    rows = [
+        [KeyboardButton(text=BTN_BOOK), KeyboardButton(text=BTN_PRICE)],
+        [KeyboardButton(text=BTN_CONTACTS), KeyboardButton(text=BTN_AI)],
+        [KeyboardButton(text=BTN_ABOUT), KeyboardButton(text=BTN_MY_BOOKING)],
+    ]
+    if _webapp_url:
+        # IMPORTANT: this MUST be web_app=WebAppInfo(...), not url=... — only
+        # the web_app button type opens Telegram's actual Mini App WebView
+        # with a working JS bridge (Telegram.WebApp.sendData() etc.). A plain
+        # url= button would just open it as an external browser link, where
+        # sendData() has nothing to talk to and the booking handoff breaks.
+        rows.append([KeyboardButton(text="🌐 Міні-додаток", web_app=WebAppInfo(url=_webapp_url))])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
 def contact_request_keyboard() -> ReplyKeyboardMarkup:
