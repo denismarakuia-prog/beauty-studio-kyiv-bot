@@ -93,6 +93,23 @@ class UserRepository:
         user = await self.get_user(telegram_id)
         return bool(user and user.get("full_name"))
 
+    async def set_language(self, telegram_id: int, language: str) -> None:
+        async with aiosqlite.connect(self._path) as db:
+            await db.execute(
+                """
+                INSERT INTO users (telegram_id, language)
+                VALUES (?, ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET
+                    language = excluded.language
+                """,
+                (telegram_id, language),
+            )
+            await db.commit()
+
+    async def get_language(self, telegram_id: int) -> Optional[str]:
+        user = await self.get_user(telegram_id)
+        return user.get("language") if user else None
+
     async def has_phone(self, telegram_id: int) -> bool:
         user = await self.get_user(telegram_id)
         return bool(user and user.get("phone"))
@@ -197,24 +214,44 @@ class BookingRepository:
     async def cancel_booking(self, booking_id: int, telegram_id: int) -> Optional[Dict[str, Any]]:
         """
         Cancel an active booking owned by telegram_id.
-        Returns the booking row (pre-cancellation data) if cancelled, else None.
+        Returns the booking row (pre-cancellation data) if THIS call performed
+        the cancellation, else None.
+
+        Atomic by design: the UPDATE's own "WHERE status = 'active'" clause is
+        the single source of truth for whether the cancellation happened,
+        checked via rowcount — not a separate SELECT beforehand. SQLite
+        serialises writers at the file level, so of two concurrent
+        cancel_booking() calls for the same booking (e.g. a double-tap on
+        "Cancel"), only the one that wins the write lock first will find the
+        row still 'active' and report rowcount=1; the second necessarily
+        finds it already 'cancelled' and gets rowcount=0. This guarantees at
+        most one caller ever receives a non-None result, so the admin can
+        never be notified twice nor the slot double-processed for one click.
         """
         async with aiosqlite.connect(self._path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute(
-                "SELECT * FROM bookings WHERE id = ? AND telegram_id = ? AND status = 'active'",
-                (booking_id, telegram_id),
-            ) as cur:
-                row = await cur.fetchone()
-            if not row:
-                return None
 
-            await db.execute(
+            cur = await db.execute(
                 "UPDATE bookings SET status = 'cancelled', "
                 "cancelled_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-                "WHERE id = ?",
-                (booking_id,),
+                "WHERE id = ? AND telegram_id = ? AND status = 'active'",
+                (booking_id, telegram_id),
             )
+            await db.commit()
+
+            if cur.rowcount != 1:
+                return None  # already cancelled (e.g. by a concurrent request) or never existed
+
+            # The row's descriptive fields (name/phone/service/date/time) are
+            # immutable after creation, so reading them AFTER the atomic
+            # update is exactly as safe as reading them before — only
+            # status/cancelled_at ever change, and we already know their
+            # new values.
+            async with db.execute(
+                "SELECT * FROM bookings WHERE id = ?", (booking_id,)
+            ) as cur2:
+                row = await cur2.fetchone()
+            return dict(row) if row else None
             await db.commit()
             return dict(row)
 

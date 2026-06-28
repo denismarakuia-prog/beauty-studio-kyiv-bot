@@ -16,7 +16,9 @@ from aiogram.types import ErrorEvent
 from bot.config import Config
 from bot.database.repositories import UserRepository
 from bot.handlers import admin, ai_assistant, booking, contacts, menu, my_booking, start
+from bot.i18n import t
 from bot.keyboards.builders import EMPTY_KEYBOARD, main_reply_keyboard, set_webapp_url
+from bot.middlewares.language_gate import LanguageGateMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_tracker import UserTrackerMiddleware
 
@@ -48,7 +50,7 @@ def create_bot_and_dispatcher(
     # slate, and the user always gets a real message with the main menu
     # back, instead of dead silence.
     @dp.error()
-    async def global_error_handler(event: ErrorEvent, state: FSMContext) -> None:
+    async def global_error_handler(event: ErrorEvent, state: FSMContext, lang: str = "uk") -> None:
         logger.error(
             "Unhandled exception while processing update %s: %s",
             getattr(event.update, "update_id", "?"),
@@ -66,7 +68,7 @@ def create_bot_and_dispatcher(
 
         if cq is not None:
             try:
-                await cq.answer("Сталася помилка. Спробуйте ще раз.", show_alert=True)
+                await cq.answer(t("my_booking_db_error_retry", lang), show_alert=True)
             except Exception:
                 pass
             try:
@@ -77,9 +79,8 @@ def create_bot_and_dispatcher(
         if msg is not None:
             try:
                 await msg.answer(
-                    "⚠️ Сталася технічна помилка. Спробуйте, будь ласка, ще раз — "
-                    "натисніть «📅 Записатися» або скористайтесь меню нижче 👇",
-                    reply_markup=main_reply_keyboard(),
+                    t("tech_error", lang),
+                    reply_markup=main_reply_keyboard(lang),
                     parse_mode="HTML",
                 )
             except Exception as exc:
@@ -101,10 +102,12 @@ def create_bot_and_dispatcher(
     # whether a handler matches.
     throttle = ThrottlingMiddleware(rate=0.3)
     tracker  = UserTrackerMiddleware(user_repo=user_repo)
+    lang_gate = LanguageGateMiddleware()
 
     for observer in (dp.message, dp.callback_query):
         observer.outer_middleware(throttle)
         observer.outer_middleware(tracker)
+        observer.outer_middleware(lang_gate)
 
     # ── Routers (order matters: most specific first) ────────────────────────
     dp.include_router(admin.router)         # admin commands — filtered by IsAdmin

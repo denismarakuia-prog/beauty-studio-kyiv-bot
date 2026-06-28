@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_name   TEXT,
     full_name   TEXT,        -- explicitly typed by the user during booking (authoritative)
     phone       TEXT,
+    language    TEXT,        -- 'uk' | 'ru', NULL until the user picks one on first launch
     is_blocked  INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -67,6 +68,11 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
     if "full_name" not in columns:
         logger.info("Migrating schema: adding users.full_name column")
         await db.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+        await db.commit()
+
+    if "language" not in columns:
+        logger.info("Migrating schema: adding users.language column")
+        await db.execute("ALTER TABLE users ADD COLUMN language TEXT")
         await db.commit()
 
 

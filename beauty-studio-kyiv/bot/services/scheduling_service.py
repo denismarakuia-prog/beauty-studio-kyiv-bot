@@ -32,7 +32,6 @@ from bot.salon_data import (
     OPENING_HOUR,
     SLOT_STEP_MINUTES,
     TIMEZONE_NAME,
-    WEEKDAYS_UA,
 )
 
 _TZ = ZoneInfo(TIMEZONE_NAME)

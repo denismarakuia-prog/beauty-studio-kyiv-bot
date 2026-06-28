@@ -24,6 +24,15 @@ SALON_ABOUT: str = (
     "Затишна атмосфера, приємний сервіс та результат, який перевершує "
     "очікування — ось що відрізняє нас від інших."
 )
+SALON_ABOUT_RU: str = (
+    "Beauty Studio Kyiv — это пространство, где красота встречается с заботой.\n\n"
+    "Более 8 лет мы помогаем женщинам и мужчинам Киева чувствовать себя "
+    "уверенно и ухоженно. У нас работают только сертифицированные мастера, "
+    "мы используем профессиональную косметику премиум-класса и строго "
+    "соблюдаем санитарные нормы.\n\n"
+    "Уютная атмосфера, приятный сервис и результат, который превосходит "
+    "ожидания — вот что отличает нас от других."
+)
 
 # Google Maps coordinates
 SALON_LATITUDE: float = 50.4501
@@ -74,6 +83,18 @@ class ServiceInfo:
     description: str
     duration: str
     price: str
+    # Optional Russian translations, used ONLY by the AI assistant when it
+    # detects a Russian-language question. The booking flow never reads
+    # these fields and keeps using .name/.description exactly as before —
+    # purely additive, zero impact on booking behaviour.
+    name_ru: str = ""
+    description_ru: str = ""
+
+    def name_for(self, lang: str) -> str:
+        return self.name_ru if lang == "ru" and self.name_ru else self.name
+
+    def description_for(self, lang: str) -> str:
+        return self.description_ru if lang == "ru" and self.description_ru else self.description
 
 
 SERVICES: List[ServiceInfo] = [
@@ -87,6 +108,11 @@ SERVICES: List[ServiceInfo] = [
         ),
         duration="60–90 хв",
         price="450–900 грн",
+        name_ru="Маникюр",
+        description_ru=(
+            "Классический, гелевый или комбинированный маникюр. "
+            "Используем материалы премиум-класса для идеального и долговременного результата."
+        ),
     ),
     ServiceInfo(
         id="pedicure",
@@ -98,6 +124,11 @@ SERVICES: List[ServiceInfo] = [
         ),
         duration="60–120 хв",
         price="550–1 200 грн",
+        name_ru="Педикюр",
+        description_ru=(
+            "Аппаратный или SPA-педикюр. Полный уход за стопами "
+            "с использованием качественных средств и парафинотерапией."
+        ),
     ),
     ServiceInfo(
         id="haircut",
@@ -109,6 +140,11 @@ SERVICES: List[ServiceInfo] = [
         ),
         duration="45–90 хв",
         price="350–800 грн",
+        name_ru="Стрижка",
+        description_ru=(
+            "Женская или мужская стрижка с укладкой и стайлингом "
+            "от опытных мастеров. Индивидуальный подход к каждому клиенту."
+        ),
     ),
     ServiceInfo(
         id="coloring",
@@ -120,6 +156,11 @@ SERVICES: List[ServiceInfo] = [
         ),
         duration="120–240 хв",
         price="900–3 500 грн",
+        name_ru="Окрашивание",
+        description_ru=(
+            "Любой вид окрашивания: однотонное, омбре, балаяж, мелирование. "
+            "Только премиум-краски и проверенные техники. Результат, который впечатляет."
+        ),
     ),
     ServiceInfo(
         id="cosmetology",
@@ -131,8 +172,25 @@ SERVICES: List[ServiceInfo] = [
         ),
         duration="60–90 хв",
         price="800–2 500 грн",
+        name_ru="Косметология",
+        description_ru=(
+            "Чистка лица, мезотерапия, пилинги и омолаживающие процедуры. "
+            "Ухоженная и сияющая кожа — ваше лучшее украшение."
+        ),
     ),
 ]
 
 # Quick-access dict for O(1) lookup
 SERVICES_MAP: dict[str, ServiceInfo] = {s.id: s for s in SERVICES}
+
+
+# ── Optional extra info for the AI assistant ───────────────────────────────────
+#
+# All optional — leave empty to have the assistant gracefully skip the topic
+# (it will invite the client to call/ask in person instead of inventing
+# details). None of this affects the booking flow.
+
+SALON_INSTAGRAM: str = ""           # e.g. "@beautystudio_kyiv"
+SALON_TELEGRAM_CHANNEL: str = ""    # e.g. "@beautystudio_kyiv_channel"
+SALON_PAYMENT_METHODS: str = "Готівка, банківська картка, Apple Pay/Google Pay"
+CURRENT_PROMOTIONS: str = ""        # e.g. "−15% на манікюр щовівторка до кінця місяця"

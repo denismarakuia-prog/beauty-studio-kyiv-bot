@@ -53,7 +53,6 @@ from bot.services.scheduling_service import (
     decode_month,
     decode_time,
     default_calendar_month,
-    encode_month,
     format_date_display,
     get_available_times,
     get_calendar_month,
@@ -242,7 +241,7 @@ async def _begin_booking_flow(
 
 # ── Entry points ───────────────────────────────────────────────────────────────
 
-@router.message(F.text == BTN_BOOK)
+@router.message(F.text.in_(set(BTN_BOOK.values())))
 async def entry_from_menu(
     message: Message, state: FSMContext, user_repo: UserRepository, booking_repo: BookingRepository
 ) -> None:

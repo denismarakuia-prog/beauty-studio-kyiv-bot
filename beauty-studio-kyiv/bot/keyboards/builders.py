@@ -15,6 +15,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.i18n import t
 from bot.salon_data import SERVICES
 from bot.services.scheduling_service import CalendarMonth, encode_time
 
@@ -34,23 +35,32 @@ def set_webapp_url(url: str) -> None:
     _webapp_url = url or ""
 
 
-# ── Reply-keyboard button labels (also used as exact-match filters) ───────────
+# ── Reply-keyboard button labels (bilingual; also used as exact-match filters) ─
 
-BTN_BOOK        = "📅 Записатися"
-BTN_PRICE       = "💰 Прайс"
-BTN_CONTACTS    = "📍 Контакти"
-BTN_AI          = "🤖 AI Консультант"
-BTN_ABOUT       = "ℹ️ Про салон"
-BTN_MY_BOOKING  = "📖 Мій запис"
-BTN_SHARE_PHONE = "📱 Поділитися номером"
+BTN_BOOK        = {"uk": "📅 Записатися",        "ru": "📅 Записаться"}
+BTN_PRICE       = {"uk": "💰 Прайс",             "ru": "💰 Цены"}
+BTN_CONTACTS    = {"uk": "📍 Контакти",          "ru": "📍 Контакты"}
+BTN_AI          = {"uk": "🤖 AI Консультант",    "ru": "🤖 AI Консультант"}
+BTN_ABOUT       = {"uk": "ℹ️ Про салон",         "ru": "ℹ️ О салоне"}
+BTN_MY_BOOKING  = {"uk": "📖 Мій запис",         "ru": "📖 Моя запись"}
+BTN_SHARE_PHONE = {"uk": "📱 Поділитися номером", "ru": "📱 Поделиться номером"}
+BTN_WEBAPP      = {"uk": "🌐 Міні-додаток",       "ru": "🌐 Мини-приложение"}
 
 # Used by every FSM-state free-text handler to detect "the user tapped a main
 # menu button instead of answering" and yield so the real menu handler (in a
 # later/earlier router) can take over — this is what guarantees the user can
-# never get stuck inside a flow.
+# never get stuck inside a flow. Covers BOTH languages' label text, since a
+# user's reply keyboard may be showing either variant.
 MENU_BUTTON_LABELS = frozenset(
-    {BTN_BOOK, BTN_PRICE, BTN_CONTACTS, BTN_AI, BTN_ABOUT, BTN_MY_BOOKING}
+    set(BTN_BOOK.values())
+    | set(BTN_PRICE.values())
+    | set(BTN_CONTACTS.values())
+    | set(BTN_AI.values())
+    | set(BTN_ABOUT.values())
+    | set(BTN_MY_BOOKING.values())
 )
+
+LANG_CALLBACK_PREFIX = "lang_"
 
 
 # ── CallbackData schemas ───────────────────────────────────────────────────────
@@ -84,11 +94,11 @@ class MyBookingCallback(CallbackData, prefix="mb"):
 # ── Persistent reply keyboard (always visible) ─────────────────────────────────
 
 
-def main_reply_keyboard() -> ReplyKeyboardMarkup:
+def main_reply_keyboard(lang: str = "uk") -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text=BTN_BOOK), KeyboardButton(text=BTN_PRICE)],
-        [KeyboardButton(text=BTN_CONTACTS), KeyboardButton(text=BTN_AI)],
-        [KeyboardButton(text=BTN_ABOUT), KeyboardButton(text=BTN_MY_BOOKING)],
+        [KeyboardButton(text=BTN_BOOK[lang]), KeyboardButton(text=BTN_PRICE[lang])],
+        [KeyboardButton(text=BTN_CONTACTS[lang]), KeyboardButton(text=BTN_AI[lang])],
+        [KeyboardButton(text=BTN_ABOUT[lang]), KeyboardButton(text=BTN_MY_BOOKING[lang])],
     ]
     if _webapp_url:
         # IMPORTANT: this MUST be web_app=WebAppInfo(...), not url=... — only
@@ -96,20 +106,29 @@ def main_reply_keyboard() -> ReplyKeyboardMarkup:
         # with a working JS bridge (Telegram.WebApp.sendData() etc.). A plain
         # url= button would just open it as an external browser link, where
         # sendData() has nothing to talk to and the booking handoff breaks.
-        rows.append([KeyboardButton(text="🌐 Міні-додаток", web_app=WebAppInfo(url=_webapp_url))])
+        rows.append([KeyboardButton(text=BTN_WEBAPP[lang], web_app=WebAppInfo(url=_webapp_url))])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
-def contact_request_keyboard() -> ReplyKeyboardMarkup:
+def contact_request_keyboard(lang: str = "uk") -> ReplyKeyboardMarkup:
     """Shown while waiting for the client's phone number. Main menu stays reachable
     underneath so the user is never trapped in this step."""
     rows = [
-        [KeyboardButton(text=BTN_SHARE_PHONE, request_contact=True)],
-        [KeyboardButton(text=BTN_BOOK), KeyboardButton(text=BTN_PRICE)],
-        [KeyboardButton(text=BTN_CONTACTS), KeyboardButton(text=BTN_AI)],
-        [KeyboardButton(text=BTN_ABOUT), KeyboardButton(text=BTN_MY_BOOKING)],
+        [KeyboardButton(text=BTN_SHARE_PHONE[lang], request_contact=True)],
+        [KeyboardButton(text=BTN_BOOK[lang]), KeyboardButton(text=BTN_PRICE[lang])],
+        [KeyboardButton(text=BTN_CONTACTS[lang]), KeyboardButton(text=BTN_AI[lang])],
+        [KeyboardButton(text=BTN_ABOUT[lang]), KeyboardButton(text=BTN_MY_BOOKING[lang])],
     ]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def language_picker_keyboard() -> InlineKeyboardMarkup:
+    """Shown exactly once, on first contact, gated by LanguageGateMiddleware."""
+    b = InlineKeyboardBuilder()
+    b.button(text="🇺🇦 Українська", callback_data=f"{LANG_CALLBACK_PREFIX}uk")
+    b.button(text="🇷🇺 Русский", callback_data=f"{LANG_CALLBACK_PREFIX}ru")
+    b.adjust(1)
+    return b.as_markup()
 
 
 # Pass this explicitly to edit_text(reply_markup=...) on any message that
@@ -229,34 +248,34 @@ def duplicate_booking_keyboard(booking_id: int) -> InlineKeyboardMarkup:
 # ── My booking ─────────────────────────────────────────────────────────────────
 
 
-def my_booking_keyboard(booking_id: int) -> InlineKeyboardMarkup:
+def my_booking_keyboard(booking_id: int, lang: str = "uk") -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(
-        text="❌ Скасувати запис",
+        text=t("btn_cancel_booking", lang),
         callback_data=MyBookingCallback(action="cancel_ask", booking_id=str(booking_id)),
     )
     b.adjust(1)
     return b.as_markup()
 
 
-def my_booking_confirm_cancel_keyboard(booking_id: int) -> InlineKeyboardMarkup:
+def my_booking_confirm_cancel_keyboard(booking_id: int, lang: str = "uk") -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(
-        text="✅ Так, скасувати",
+        text=t("btn_yes_cancel", lang),
         callback_data=MyBookingCallback(action="cancel_yes", booking_id=str(booking_id)),
     )
     b.button(
-        text="↩️ Ні, залишити",
+        text=t("btn_no_keep", lang),
         callback_data=MyBookingCallback(action="cancel_no", booking_id=str(booking_id)),
     )
     b.adjust(1)
     return b.as_markup()
 
 
-def book_now_keyboard() -> InlineKeyboardMarkup:
+def book_now_keyboard(lang: str = "uk") -> InlineKeyboardMarkup:
     """Used when the user has no active booking yet (e.g. in 'Мій запис')."""
     b = InlineKeyboardBuilder()
-    b.button(text="📅 Записатися", callback_data=BookingCallback(action="start"))
+    b.button(text=t("btn_book_now", lang), callback_data=BookingCallback(action="start"))
     b.adjust(1)
     return b.as_markup()
 
